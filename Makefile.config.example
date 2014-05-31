@@ -1,6 +1,12 @@
 ## Refer to http://caffe.berkeleyvision.org/installation.html
 # Contributions simplifying and improving our build system are welcome!
 
+# add by wanji - begin
+# fix the compile error:
+# 	`kernel launches from templates are not allowed in system files`
+export CPLUS_INCLUDE_PATH=
+# add by wanji - end
+
 # CUDA directory contains bin/ and lib/ directories that we need.
 CUDA_DIR := /usr/local/cuda
 
@@ -40,8 +46,8 @@ PYTHON_LIB := /usr/local/lib
 # PYTHON_LIB := $(HOME)/anaconda/lib
 
 # Whatever else you find you need goes here.
-INCLUDE_DIRS := $(PYTHON_INCLUDE) /usr/local/include
-LIBRARY_DIRS := $(PYTHON_LIB) /usr/local/lib /usr/lib
+INCLUDE_DIRS := $(PYTHON_INCLUDE) /usr/local/include $(MYROOT)/include
+LIBRARY_DIRS := $(PYTHON_LIB) /usr/local/lib /usr/lib /usr/local/cuda/lib64 /lib $(MYROOT)/lib
 
 BUILD_DIR := build
 DISTRIBUTE_DIR := distribute

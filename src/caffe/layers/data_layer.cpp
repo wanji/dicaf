@@ -3,9 +3,11 @@
 #include <stdint.h>
 #include <leveldb/db.h>
 #include <pthread.h>
+#include <mpi.h>
 
 #include <string>
 #include <vector>
+#include <sstream>
 
 #include "caffe/layer.hpp"
 #include "caffe/util/io.hpp"
@@ -142,11 +144,15 @@ void DataLayer<Dtype>::SetUp(const vector<Blob<Dtype>*>& bottom,
   leveldb::Options options;
   options.create_if_missing = false;
   options.max_open_files = 100;
-  LOG(INFO) << "Opening leveldb " << this->layer_param_.data_param().source();
+  std::ostringstream data_source;
+  int rank = -1;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  data_source << this->layer_param_.data_param().source() << "-" << rank;
+  LOG(INFO) << "Opening leveldb " << data_source.str();
   leveldb::Status status = leveldb::DB::Open(
-      options, this->layer_param_.data_param().source(), &db_temp);
+      options, data_source.str(), &db_temp);
   CHECK(status.ok()) << "Failed to open leveldb "
-      << this->layer_param_.data_param().source() << std::endl
+      << data_source.str() << std::endl
       << status.ToString();
   db_.reset(db_temp);
   iter_.reset(db_->NewIterator(leveldb::ReadOptions()));

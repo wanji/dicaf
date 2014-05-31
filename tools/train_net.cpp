@@ -6,6 +6,7 @@
 //    train_net net_proto_file solver_proto_file [resume_point_file]
 
 #include <cuda_runtime.h>
+#include <mpi.h>
 
 #include <cstring>
 
@@ -20,6 +21,14 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  MPI_Init(&argc, &argv);
+
+  int size, rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  fprintf(stderr, "my rank: %d / %d\n", rank, size); fflush(stderr);
+
   SolverParameter solver_param;
   ReadProtoFromTextFileOrDie(argv[1], &solver_param);
 
@@ -33,5 +42,6 @@ int main(int argc, char** argv) {
   }
   LOG(INFO) << "Optimization Done.";
 
+  MPI_Finalize();
   return 0;
 }

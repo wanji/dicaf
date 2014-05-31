@@ -119,6 +119,7 @@ LIBRARIES := cudart cublas curand \
 	boost_system \
 	hdf5_hl hdf5 \
 	opencv_core opencv_highgui opencv_imgproc
+LIBRARIES += $(MPI_LIBRARIES)
 PYTHON_LIBRARIES := boost_python python2.7
 WARNINGS := -Wall
 
