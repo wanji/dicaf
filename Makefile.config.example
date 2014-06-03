@@ -49,6 +49,8 @@ PYTHON_LIB := /usr/local/lib
 INCLUDE_DIRS := $(PYTHON_INCLUDE) /usr/local/include $(MYROOT)/include
 LIBRARY_DIRS := $(PYTHON_LIB) /usr/local/lib /usr/lib /usr/local/cuda/lib64 /lib $(MYROOT)/lib
 
+MPI_LIBRARIES := mpichcxx mpich
+
 BUILD_DIR := build
 DISTRIBUTE_DIR := distribute
 
