@@ -78,7 +78,7 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   // very long time (param_.test_interval() training iterations) to report that
   // there's not enough memory to run the test net and crash, etc.; and to gauge
   // the effect of the first training iterations.
-  if (param_.test_interval()) {
+  if (param_.test_interval() && mpi_rank_ == 0) {
     Test();
   }
 
@@ -87,24 +87,33 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   vector<Blob<Dtype>*> bottom_vec;
   while (iter_++ < param_.max_iter()) {
     if (mpi_rank_ > 0) {
+      // receive the latest parameters from parameter server
+      net_->RecvParams(0);
+
       Dtype loss = net_->ForwardBackward(bottom_vec);
       ComputeUpdateValue();
       net_->SendUpdateValue(0);
-      net_->RecvParams(0);
 
       if (param_.display() && iter_ % param_.display() == 0) {
-        LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
+        LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
+          << " (rank: " << mpi_rank_ << ")";
       }
     } else {
       for (int i=1; i<mpi_size_; i++) {
+        // send current parameters to job-i
+        net_->SendParams(i);
+      }
+
+      for (int i=1; i<mpi_size_; i++) {
         // receive update values from job-i
         net_->RecvUpdateValue(i);
-        LOG(INFO) << "Got updates of Iter-" << iter_ << " from node " << i;
+
+        if (param_.display() && iter_ % param_.display() == 0) {
+          LOG(INFO) << "Got updates of Iter-" << iter_ << " from node " << i;
+        }
+
         // update the values
         net_->Update();
-        // send updated parameters to job-i
-        net_->SendParams(i);
-        LOG(INFO) << "Send updated parameter to node " << i;
       }
       if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
         Test();
