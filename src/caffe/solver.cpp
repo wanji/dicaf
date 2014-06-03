@@ -1,6 +1,7 @@
 // Copyright 2014 BVLC and contributors.
 
 #include <cstdio>
+#include <mpi.h>
 
 #include <algorithm>
 #include <string>
@@ -37,6 +38,12 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   if (param_.random_seed() >= 0) {
     Caffe::set_random_seed(param_.random_seed());
   }
+
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size_);
+
+  fprintf(stderr, "my rank: %d / %d\n", mpi_rank_, mpi_size_); fflush(stderr);
+
   // Scaffolding code
   LOG(INFO) << "Creating training net.";
   net_.reset(new Net<Dtype>(param_.train_net()));
@@ -79,19 +86,33 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   // should be given, and we will just provide dummy vecs.
   vector<Blob<Dtype>*> bottom_vec;
   while (iter_++ < param_.max_iter()) {
-    Dtype loss = net_->ForwardBackward(bottom_vec);
-    ComputeUpdateValue();
-    net_->Update();
+    if (mpi_rank_ > 0) {
+      Dtype loss = net_->ForwardBackward(bottom_vec);
+      ComputeUpdateValue();
+      net_->SendUpdateValue(0);
+      net_->RecvParams(0);
 
-    if (param_.display() && iter_ % param_.display() == 0) {
-      LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
-    }
-    if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
-      Test();
-    }
-    // Check if we need to do snapshot
-    if (param_.snapshot() && iter_ % param_.snapshot() == 0) {
-      Snapshot();
+      if (param_.display() && iter_ % param_.display() == 0) {
+        LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
+      }
+    } else {
+      for (int i=1; i<mpi_size_; i++) {
+        // receive update values from job-i
+        net_->RecvUpdateValue(i);
+        LOG(INFO) << "Got updates of Iter-" << iter_ << " from node " << i;
+        // update the values
+        net_->Update();
+        // send updated parameters to job-i
+        net_->SendParams(i);
+        LOG(INFO) << "Send updated parameter to node " << i;
+      }
+      if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
+        Test();
+      }
+      // Check if we need to do snapshot
+      if (param_.snapshot() && iter_ % param_.snapshot() == 0) {
+        Snapshot();
+      }
     }
   }
   // After the optimization is done, always do a snapshot.

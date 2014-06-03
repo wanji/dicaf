@@ -1,5 +1,7 @@
 // Copyright 2014 BVLC and contributors.
 
+#include <mpi.h>
+
 #include <map>
 #include <set>
 #include <string>
@@ -363,6 +365,80 @@ template <typename Dtype>
 void Net<Dtype>::Update() {
   for (int i = 0; i < params_.size(); ++i) {
     params_[i]->Update();
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::SendUpdateValue(int rank) {
+  switch (Caffe::mode()) {
+  case Caffe::CPU:
+    for (int i = 0; i < params_.size(); ++i) {
+      MPI_Send(params_[i]->cpu_diff(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD);
+    }
+    break;
+  case Caffe::GPU:
+    for (int i = 0; i < params_.size(); ++i) {
+      MPI_Send(params_[i]->gpu_diff(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD);
+    }
+    break;
+  default:
+    LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::RecvUpdateValue(int rank) {
+  MPI_Status stat;
+  switch (Caffe::mode()) {
+  case Caffe::CPU:
+    for (int i = 0; i < params_.size(); ++i) {
+      MPI_Recv(params_[i]->mutable_cpu_diff(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD, &stat);
+    }
+    break;
+  case Caffe::GPU:
+    for (int i = 0; i < params_.size(); ++i) {
+      MPI_Recv(params_[i]->mutable_gpu_diff(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD, &stat);
+    }
+    break;
+  default:
+    LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::SendParams(int rank) {
+  switch (Caffe::mode()) {
+  case Caffe::CPU:
+    for (int i = 0; i < params_.size(); ++i) {
+      MPI_Send(params_[i]->cpu_data(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD);
+    }
+    break;
+  case Caffe::GPU:
+    for (int i = 0; i < params_.size(); ++i) {
+      MPI_Send(params_[i]->gpu_data(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD);
+    }
+    break;
+  default:
+    LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::RecvParams(int rank) {
+  MPI_Status stat;
+  switch (Caffe::mode()) {
+  case Caffe::CPU:
+    for (int i = 0; i < params_.size(); ++i) {
+      MPI_Recv(params_[i]->mutable_cpu_data(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD, &stat);
+    }
+    break;
+  case Caffe::GPU:
+    for (int i = 0; i < params_.size(); ++i) {
+      MPI_Recv(params_[i]->mutable_gpu_data(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD, &stat);
+    }
+    break;
+  default:
+    LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
   }
 }
 

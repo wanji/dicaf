@@ -54,6 +54,16 @@ class Net {
   // Updates the network weights based on the diff values computed.
   void Update();
 
+  // (Computing node)   Send update values to the parameter server
+  void SendUpdateValue(int rank);
+  // (Parameter Server) Receive update values from the computing node
+  void RecvUpdateValue(int rank);
+
+  // (Parameter Server) Send parameters to the computing node
+  void SendParams(int rank);
+  // (Computing node)   Receive parameters from the parameter server
+  void RecvParams(int rank);
+
   // For an already initialized net, ShareTrainedLayersWith() implicitly copies
   // (i.e., using no additional memory) the already trained layers from another
   // Net.
