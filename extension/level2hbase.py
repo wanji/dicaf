@@ -102,7 +102,7 @@ def main(args):
         cnt += 1
         if cnt % 100 == 0:
             pinfo("\r\t%d" % cnt)
-        client.mutateRow('cifar-train', item[0],
+        client.mutateRow(args.table, item[0],
                          [Mutation(column="cf:data", value=item[1])], None)
     pinfo("\r\t%d\tDone!\n" % cnt)
 
