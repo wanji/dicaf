@@ -135,7 +135,9 @@ void* DataLayerPrefetch(void* layer_pointer) {
     layer->iter_->Next();
     if (!layer->iter_->Valid()) {
       // We have reached the end. Restart from the first.
-      DLOG(INFO) << "Restarting data prefetching from start.";
+      int rank = -1;
+      MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+      DLOG(INFO) << "Restarting data prefetching from start. (rank " << rank << ")";
       layer->iter_->SeekToFirst();
     }
   }
@@ -145,6 +147,8 @@ void* DataLayerPrefetch(void* layer_pointer) {
 
 template <typename Dtype>
 void* HBaseDataLayerPrefetch(void* layer_pointer) {
+int rank = -1;
+MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   CHECK(layer_pointer);
   HBaseDataLayer<Dtype>* layer = static_cast<HBaseDataLayer<Dtype>*>(layer_pointer);
   CHECK(layer);
@@ -176,15 +180,18 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   data_batch.reserve(batch_size);
   std::vector<TRowResult> rowResult;
   while (data_batch.size() < batch_size) {
+DLOG(INFO) << "rank: " << rank << ", fetched: " << data_batch.size();
     size_t rest = batch_size - data_batch.size();
+DLOG(INFO) << "rank: " << rank << ", rest:    " << rest << ", scanner: " << layer->scanner_;
     layer->client_->scannerGetList(rowResult, layer->scanner_, rest);
+DLOG(INFO) << "rank: " << rank << ", row size: " << rowResult.size();
     if (rowResult.size() < rest) {
       // We have reached the end. Restart from the first.
-      DLOG(INFO) << "Restarting data prefetching from start.";
       layer->ResetScanner();
     }
     data_batch.insert(data_batch.end(), rowResult.begin(), rowResult.end());
   }
+DLOG(INFO) << "rank: " << rank;
 
   for (int item_id = 0; item_id < batch_size; ++item_id) {
     datum.ParseFromString(data_batch[item_id].columns.begin()->second.value);
@@ -422,12 +429,14 @@ INSTANTIATE_CLASS(DataLayer);
 template <typename Dtype>
 std::string HBaseDataLayer<Dtype>::SetUpDB() {
 	// Initialize the HBase client
-	boost::shared_ptr<TTransport> socket(new TSocket("caf1", 9090));
+	boost::shared_ptr<TTransport> socket(new TSocket(
+        this->layer_param_.data_param().host(),
+        this->layer_param_.data_param().port()));
 	boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
 	boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
 	this->client_.reset(new HbaseClient(protocol));
 
-  this->table_ = "cifar-train";
+  this->table_ = this->layer_param_.data_param().source();
   this->start_ = "";
   this->columns_.push_back("cf:data");
 
@@ -437,9 +446,9 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 		transport->open();
 
 		// fetch the first row
-		LOG(INFO) << "info: " << "caf1";
-		LOG(INFO) << "info: " << 9090;
-		LOG(INFO) << "info: " << this->table_;
+    LOG(INFO) << "** hbase info (host):  " << this->layer_param_.data_param().host()
+      << ":" << this->layer_param_.data_param().port()
+		  << "/" << this->table_;
 		int scanner = this->client_->scannerOpen(this->table_, this->start_,
         this->columns_, this->attributes_);
     this->client_->scannerGet(rowResult, scanner);
@@ -474,10 +483,16 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 
 template <typename Dtype>
 void HBaseDataLayer<Dtype>::ResetScanner() {
+  int rank = -1;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  DLOG(INFO) << "Restarting data prefetching from start. (rank " << rank << ")";
+  DLOG(INFO) << "Reset scanner: " << this->scanner_ << " (rank " << rank << ")";
+
   this->client_->scannerClose(this->scanner_);
 
   this->scanner_ = this->client_->scannerOpen(this->table_, this->start_,
       this->columns_, this->attributes_);
+  DLOG(INFO) << "New scanner:   " << this->scanner_ << " (rank " << rank << ")";
 }
 
 

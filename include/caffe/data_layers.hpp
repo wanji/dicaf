@@ -159,7 +159,7 @@ class HBaseDataLayer : public DataLayer<Dtype> {
   virtual void ResetScanner();
 
   shared_ptr<HbaseClient> client_;
-  int scanner_;
+
   std::string table_;
   std::string start_;
   std::vector<std::string> columns_;
