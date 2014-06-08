@@ -147,8 +147,6 @@ void* DataLayerPrefetch(void* layer_pointer) {
 
 template <typename Dtype>
 void* HBaseDataLayerPrefetch(void* layer_pointer) {
-int rank = -1;
-MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   CHECK(layer_pointer);
   HBaseDataLayer<Dtype>* layer = static_cast<HBaseDataLayer<Dtype>*>(layer_pointer);
   CHECK(layer);
@@ -174,24 +172,32 @@ MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   const int width = layer->datum_width_;
   const int size = layer->datum_size_;
   const Dtype* mean = layer->data_mean_.cpu_data();
-  
+// int rank;
+// MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   // fetch data from HBase
+  int scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
+      layer->columns_, layer->attributes_);
+  unsigned int num_get = batch_size + 1;
   std::vector<TRowResult> data_batch;
-  data_batch.reserve(batch_size);
+  data_batch.reserve(num_get);
   std::vector<TRowResult> rowResult;
-  while (data_batch.size() < batch_size) {
-DLOG(INFO) << "rank: " << rank << ", fetched: " << data_batch.size();
-    size_t rest = batch_size - data_batch.size();
-DLOG(INFO) << "rank: " << rank << ", rest:    " << rest << ", scanner: " << layer->scanner_;
-    layer->client_->scannerGetList(rowResult, layer->scanner_, rest);
-DLOG(INFO) << "rank: " << rank << ", row size: " << rowResult.size();
+// DLOG(INFO) << "out : " << data_batch.size() << "/" << num_get << ", rank: " << rank;
+  while (data_batch.size() < num_get) {
+// DLOG(INFO) << data_batch.size() << "/" << num_get << ", rank: " << rank;
+    size_t rest = num_get - data_batch.size();
+    layer->client_->scannerGetList(rowResult, scanner, rest);
     if (rowResult.size() < rest) {
       // We have reached the end. Restart from the first.
+// DLOG(INFO) << rowResult.size() << "/" << rest << ", rank: " << rank;
       layer->ResetScanner();
+      scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
+      layer->columns_, layer->attributes_);
     }
     data_batch.insert(data_batch.end(), rowResult.begin(), rowResult.end());
   }
-DLOG(INFO) << "rank: " << rank;
+// DLOG(INFO) << "out" << ", rank: " << rank;
+  layer->start_ = rowResult[rowResult.size() - 1].row;
+  layer->client_->scannerClose(scanner);
 
   for (int item_id = 0; item_id < batch_size; ++item_id) {
     datum.ParseFromString(data_batch[item_id].columns.begin()->second.value);
@@ -449,18 +455,14 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
     LOG(INFO) << "** hbase info (host):  " << this->layer_param_.data_param().host()
       << ":" << this->layer_param_.data_param().port()
 		  << "/" << this->table_;
-		int scanner = this->client_->scannerOpen(this->table_, this->start_,
-        this->columns_, this->attributes_);
-    this->client_->scannerGet(rowResult, scanner);
+
+    ResetScanner();
+    this->client_->getRow(rowResult, this->table_, this->start_, this->attributes_);
     if (rowResult.size() < 1) {
       LOG(FATAL) << "Empty database!";
     } else if (rowResult.size() > 1) {
       LOG(FATAL) << "Unknown database error!";
     }
-    this->client_->scannerClose(scanner);
-
-    this->scanner_ = this->client_->scannerOpen(this->table_, this->start_,
-        this->columns_, this->attributes_);
 	} catch (const TException &tx) {
 		LOG(FATAL) << "ERROR: " << tx.what();
   }
@@ -470,13 +472,21 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 	  unsigned int skip = caffe_rng_rand() %
 	                      this->layer_param_.data_param().rand_skip();
 	  LOG(INFO) << "Skipping first " << skip << " data points.";
-    while (skip > 0) {
-      this->client_->scannerGetList(rowResult, this->scanner_, skip);
-      if (rowResult.size() < skip) {
+		int scanner = this->client_->scannerOpen(this->table_, this->start_,
+        this->columns_, this->attributes_);
+    // fetch skip+1 rows, and use the key of the `skip+1`-th row as new start_
+    unsigned int num_get = skip + 1;
+    while (num_get > 0) {
+      this->client_->scannerGetList(rowResult, scanner, num_get);
+      if (rowResult.size() < num_get) {
         ResetScanner();
+        scanner = this->client_->scannerOpen(this->table_, this->start_,
+            this->columns_, this->attributes_);
       }
-      skip -= rowResult.size();
+      num_get -= rowResult.size();
     }
+    this->start_ = rowResult[rowResult.size() - 1].row;
+    this->client_->scannerClose(scanner);
 	}
   return rowResult[0].columns.begin()->second.value;
 }
@@ -486,13 +496,7 @@ void HBaseDataLayer<Dtype>::ResetScanner() {
   int rank = -1;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   DLOG(INFO) << "Restarting data prefetching from start. (rank " << rank << ")";
-  DLOG(INFO) << "Reset scanner: " << this->scanner_ << " (rank " << rank << ")";
-
-  this->client_->scannerClose(this->scanner_);
-
-  this->scanner_ = this->client_->scannerOpen(this->table_, this->start_,
-      this->columns_, this->attributes_);
-  DLOG(INFO) << "New scanner:   " << this->scanner_ << " (rank " << rank << ")";
+  this->start_ = "";
 }
 
 
