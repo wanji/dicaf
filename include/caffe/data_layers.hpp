@@ -17,6 +17,18 @@
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
+namespace apache {
+	namespace hadoop {
+		namespace hbase {
+			namespace thrift {
+				class HbaseClient;
+			}
+		}
+	}
+}
+
+using apache::hadoop::hbase::thrift::HbaseClient;
+
 namespace caffe {
 
 #define HDF5_DATA_DATASET_NAME "data"
@@ -84,6 +96,10 @@ class HDF5DataLayer : public Layer<Dtype> {
 template <typename Dtype>
 void* DataLayerPrefetch(void* layer_pointer);
 
+// This function is used to create a pthread that prefetches the data from HBase.
+template <typename Dtype>
+void* HBaseDataLayerPrefetch(void* layer_pointer);
+
 template <typename Dtype>
 class DataLayer : public Layer<Dtype> {
   // The function used to perform prefetching.
@@ -95,6 +111,8 @@ class DataLayer : public Layer<Dtype> {
   virtual ~DataLayer();
   virtual void SetUp(const vector<Blob<Dtype>*>& bottom,
       vector<Blob<Dtype>*>* top);
+  // Setup the database and return the first data point to initialize the top blob
+  virtual std::string SetUpDB();
 
  protected:
   virtual Dtype Forward_cpu(const vector<Blob<Dtype>*>& bottom,
@@ -123,6 +141,29 @@ class DataLayer : public Layer<Dtype> {
   Blob<Dtype> data_mean_;
   bool output_labels_;
   Caffe::Phase phase_;
+};
+
+template <typename Dtype>
+class HBaseDataLayer : public DataLayer<Dtype> {
+  // The function used to perform prefetching.
+  friend void* HBaseDataLayerPrefetch<Dtype>(void* layer_pointer);
+
+ public:
+  explicit HBaseDataLayer(const LayerParameter& param)
+      : DataLayer<Dtype>(param) {}
+  // Setup the database and return the first data point to initialize the top blob
+  virtual std::string SetUpDB();
+
+ protected:
+  virtual void CreatePrefetchThread();
+  virtual void ResetScanner();
+
+  shared_ptr<HbaseClient> client_;
+  int scanner_;
+  std::string table_;
+  std::string start_;
+  std::vector<std::string> columns_;
+  std::map<std::string, std::string> attributes_;
 };
 
 // This function is used to create a pthread that prefetches the data.

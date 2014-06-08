@@ -502,6 +502,8 @@ LayerParameter_LayerType UpgradeV0LayerType(const string& type) {
     return LayerParameter_LayerType_CONVOLUTION;
   } else if (type == "data") {
     return LayerParameter_LayerType_DATA;
+  } else if (type == "hbase_data") {
+    return LayerParameter_LayerType_HBASE_DATA;
   } else if (type == "dropout") {
     return LayerParameter_LayerType_DROPOUT;
   } else if (type == "euclidean_loss") {

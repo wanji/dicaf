@@ -5,6 +5,11 @@
 #include <pthread.h>
 #include <mpi.h>
 
+#include <boost/lexical_cast.hpp>
+#include <protocol/TBinaryProtocol.h>
+#include <transport/TSocket.h>
+#include <transport/TTransportUtils.h>
+
 #include <string>
 #include <vector>
 #include <sstream>
@@ -15,7 +20,22 @@
 #include "caffe/util/rng.hpp"
 #include "caffe/vision_layers.hpp"
 
+#include "Hbase.h"
+
 using std::string;
+
+using namespace apache::thrift;
+using namespace apache::thrift::protocol;
+using namespace apache::thrift::transport;
+
+using namespace apache::hadoop::hbase::thrift;
+
+typedef std::vector<std::string> StrVec;
+typedef std::map<std::string,std::string> StrMap;
+typedef std::vector<ColumnDescriptor> ColVec;
+typedef std::map<std::string,ColumnDescriptor> ColMap;
+typedef std::vector<TCell> CellVec;
+typedef std::map<std::string,TCell> CellMap;
 
 namespace caffe {
 
@@ -124,6 +144,116 @@ void* DataLayerPrefetch(void* layer_pointer) {
 }
 
 template <typename Dtype>
+void* HBaseDataLayerPrefetch(void* layer_pointer) {
+  CHECK(layer_pointer);
+  HBaseDataLayer<Dtype>* layer = static_cast<HBaseDataLayer<Dtype>*>(layer_pointer);
+  CHECK(layer);
+  Datum datum;
+  CHECK(layer->prefetch_data_);
+  Dtype* top_data = layer->prefetch_data_->mutable_cpu_data();
+  Dtype* top_label;
+  if (layer->output_labels_) {
+    top_label = layer->prefetch_label_->mutable_cpu_data();
+  }
+  const Dtype scale = layer->layer_param_.data_param().scale();
+  const int batch_size = layer->layer_param_.data_param().batch_size();
+  const int crop_size = layer->layer_param_.data_param().crop_size();
+  const bool mirror = layer->layer_param_.data_param().mirror();
+
+  if (mirror && crop_size == 0) {
+    LOG(FATAL) << "Current implementation requires mirror and crop_size to be "
+        << "set at the same time.";
+  }
+  // datum scales
+  const int channels = layer->datum_channels_;
+  const int height = layer->datum_height_;
+  const int width = layer->datum_width_;
+  const int size = layer->datum_size_;
+  const Dtype* mean = layer->data_mean_.cpu_data();
+  
+  // fetch data from HBase
+  std::vector<TRowResult> data_batch;
+  data_batch.reserve(batch_size);
+  std::vector<TRowResult> rowResult;
+  while (data_batch.size() < batch_size) {
+    size_t rest = batch_size - data_batch.size();
+    layer->client_->scannerGetList(rowResult, layer->scanner_, rest);
+    if (rowResult.size() < rest) {
+      // We have reached the end. Restart from the first.
+      DLOG(INFO) << "Restarting data prefetching from start.";
+      layer->ResetScanner();
+    }
+    data_batch.insert(data_batch.end(), rowResult.begin(), rowResult.end());
+  }
+
+  for (int item_id = 0; item_id < batch_size; ++item_id) {
+    datum.ParseFromString(data_batch[item_id].columns.begin()->second.value);
+    const string& data = datum.data();
+    if (crop_size) {
+      CHECK(data.size()) << "Image cropping only support uint8 data";
+      int h_off, w_off;
+      // We only do random crop when we do training.
+      if (layer->phase_ == Caffe::TRAIN) {
+        h_off = layer->PrefetchRand() % (height - crop_size);
+        w_off = layer->PrefetchRand() % (width - crop_size);
+      } else {
+        h_off = (height - crop_size) / 2;
+        w_off = (width - crop_size) / 2;
+      }
+      if (mirror && layer->PrefetchRand() % 2) {
+        // Copy mirrored version
+        for (int c = 0; c < channels; ++c) {
+          for (int h = 0; h < crop_size; ++h) {
+            for (int w = 0; w < crop_size; ++w) {
+              int top_index = ((item_id * channels + c) * crop_size + h)
+                              * crop_size + (crop_size - 1 - w);
+              int data_index = (c * height + h + h_off) * width + w + w_off;
+              Dtype datum_element =
+                  static_cast<Dtype>(static_cast<uint8_t>(data[data_index]));
+              top_data[top_index] = (datum_element - mean[data_index]) * scale;
+            }
+          }
+        }
+      } else {
+        // Normal copy
+        for (int c = 0; c < channels; ++c) {
+          for (int h = 0; h < crop_size; ++h) {
+            for (int w = 0; w < crop_size; ++w) {
+              int top_index = ((item_id * channels + c) * crop_size + h)
+                              * crop_size + w;
+              int data_index = (c * height + h + h_off) * width + w + w_off;
+              Dtype datum_element =
+                  static_cast<Dtype>(static_cast<uint8_t>(data[data_index]));
+              top_data[top_index] = (datum_element - mean[data_index]) * scale;
+            }
+          }
+        }
+      }
+    } else {
+      // we will prefer to use data() first, and then try float_data()
+      if (data.size()) {
+        for (int j = 0; j < size; ++j) {
+          Dtype datum_element =
+              static_cast<Dtype>(static_cast<uint8_t>(data[j]));
+          top_data[item_id * size + j] = (datum_element - mean[j]) * scale;
+        }
+      } else {
+        for (int j = 0; j < size; ++j) {
+          top_data[item_id * size + j] =
+              (datum.float_data(j) - mean[j]) * scale;
+        }
+      }
+    }
+
+    if (layer->output_labels_) {
+      top_label[item_id] = datum.label();
+    }
+  }
+
+  return static_cast<void*>(NULL);
+}
+
+template <typename Dtype>
 DataLayer<Dtype>::~DataLayer<Dtype>() {
   JoinPrefetchThread();
 }
@@ -139,39 +269,11 @@ void DataLayer<Dtype>::SetUp(const vector<Blob<Dtype>*>& bottom,
   } else {
     output_labels_ = true;
   }
-  // Initialize the leveldb
-  leveldb::DB* db_temp;
-  leveldb::Options options;
-  options.create_if_missing = false;
-  options.max_open_files = 100;
-  std::ostringstream data_source;
-  int rank = -1;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  data_source << this->layer_param_.data_param().source() << "-" << rank;
-  LOG(INFO) << "Opening leveldb " << data_source.str();
-  leveldb::Status status = leveldb::DB::Open(
-      options, data_source.str(), &db_temp);
-  CHECK(status.ok()) << "Failed to open leveldb "
-      << data_source.str() << std::endl
-      << status.ToString();
-  db_.reset(db_temp);
-  iter_.reset(db_->NewIterator(leveldb::ReadOptions()));
-  iter_->SeekToFirst();
-  // Check if we would need to randomly skip a few data points
-  if (this->layer_param_.data_param().rand_skip()) {
-    unsigned int skip = caffe_rng_rand() %
-                        this->layer_param_.data_param().rand_skip();
-    LOG(INFO) << "Skipping first " << skip << " data points.";
-    while (skip-- > 0) {
-      iter_->Next();
-      if (!iter_->Valid()) {
-        iter_->SeekToFirst();
-      }
-    }
-  }
+
   // Read a data point, and use it to initialize the top blob.
   Datum datum;
-  datum.ParseFromString(iter_->value().ToString());
+  datum.ParseFromString(this->SetUpDB());
+
   // image
   int crop_size = this->layer_param_.data_param().crop_size();
   if (crop_size > 0) {
@@ -234,6 +336,41 @@ void DataLayer<Dtype>::SetUp(const vector<Blob<Dtype>*>& bottom,
 }
 
 template <typename Dtype>
+std::string DataLayer<Dtype>::SetUpDB() {
+  // Initialize the leveldb
+  leveldb::DB* db_temp;
+  leveldb::Options options;
+  options.create_if_missing = false;
+  options.max_open_files = 100;
+  std::ostringstream data_source;
+  int rank = -1;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  data_source << this->layer_param_.data_param().source() << "-" << rank;
+  LOG(INFO) << "Opening leveldb " << data_source.str();
+  leveldb::Status status = leveldb::DB::Open(
+      options, data_source.str(), &db_temp);
+  CHECK(status.ok()) << "Failed to open leveldb "
+      << data_source.str() << std::endl
+      << status.ToString();
+  db_.reset(db_temp);
+  iter_.reset(db_->NewIterator(leveldb::ReadOptions()));
+  iter_->SeekToFirst();
+  // Check if we would need to randomly skip a few data points
+  if (this->layer_param_.data_param().rand_skip()) {
+    unsigned int skip = caffe_rng_rand() %
+                        this->layer_param_.data_param().rand_skip();
+    LOG(INFO) << "Skipping first " << skip << " data points.";
+    while (skip-- > 0) {
+      iter_->Next();
+      if (!iter_->Valid()) {
+        iter_->SeekToFirst();
+      }
+    }
+  }
+  return iter_->value().ToString();
+}
+
+template <typename Dtype>
 void DataLayer<Dtype>::CreatePrefetchThread() {
   phase_ = Caffe::phase();
   const bool prefetch_needs_rand = (phase_ == Caffe::TRAIN) &&
@@ -281,5 +418,86 @@ Dtype DataLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 }
 
 INSTANTIATE_CLASS(DataLayer);
+
+template <typename Dtype>
+std::string HBaseDataLayer<Dtype>::SetUpDB() {
+	// Initialize the HBase client
+	boost::shared_ptr<TTransport> socket(new TSocket("caf1", 9090));
+	boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+	boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+	this->client_.reset(new HbaseClient(protocol));
+
+  this->table_ = "cifar-train";
+  this->start_ = "";
+  this->columns_.push_back("cf:data");
+
+  std::vector<TRowResult> rowResult;
+
+	try {
+		transport->open();
+
+		// fetch the first row
+		LOG(INFO) << "info: " << "caf1";
+		LOG(INFO) << "info: " << 9090;
+		LOG(INFO) << "info: " << this->table_;
+		int scanner = this->client_->scannerOpen(this->table_, this->start_,
+        this->columns_, this->attributes_);
+    this->client_->scannerGet(rowResult, scanner);
+    if (rowResult.size() < 1) {
+      LOG(FATAL) << "Empty database!";
+    } else if (rowResult.size() > 1) {
+      LOG(FATAL) << "Unknown database error!";
+    }
+    this->client_->scannerClose(scanner);
+
+    this->scanner_ = this->client_->scannerOpen(this->table_, this->start_,
+        this->columns_, this->attributes_);
+	} catch (const TException &tx) {
+		LOG(FATAL) << "ERROR: " << tx.what();
+  }
+
+	// Check if we would need to randomly skip a few data points
+	if (this->layer_param_.data_param().rand_skip()) {
+	  unsigned int skip = caffe_rng_rand() %
+	                      this->layer_param_.data_param().rand_skip();
+	  LOG(INFO) << "Skipping first " << skip << " data points.";
+    while (skip > 0) {
+      this->client_->scannerGetList(rowResult, this->scanner_, skip);
+      if (rowResult.size() < skip) {
+        ResetScanner();
+      }
+      skip -= rowResult.size();
+    }
+	}
+  return rowResult[0].columns.begin()->second.value;
+}
+
+template <typename Dtype>
+void HBaseDataLayer<Dtype>::ResetScanner() {
+  this->client_->scannerClose(this->scanner_);
+
+  this->scanner_ = this->client_->scannerOpen(this->table_, this->start_,
+      this->columns_, this->attributes_);
+}
+
+
+template <typename Dtype>
+void HBaseDataLayer<Dtype>::CreatePrefetchThread() {
+  this->phase_ = Caffe::phase();
+  const bool prefetch_needs_rand = (this->phase_ == Caffe::TRAIN) &&
+      (this->layer_param_.data_param().mirror() ||
+       this->layer_param_.data_param().crop_size());
+  if (prefetch_needs_rand) {
+    const unsigned int prefetch_rng_seed = caffe_rng_rand();
+    this->prefetch_rng_.reset(new Caffe::RNG(prefetch_rng_seed));
+  } else {
+    this->prefetch_rng_.reset();
+  }
+  // Create the thread.
+  CHECK(!pthread_create(&this->thread_, NULL, HBaseDataLayerPrefetch<Dtype>,
+        static_cast<void*>(this))) << "Pthread execution failed.";
+}
+
+INSTANTIATE_CLASS(HBaseDataLayer);
 
 }  // namespace caffe

@@ -149,6 +149,7 @@ message LayerParameter {
     SPLIT = 22;
     TANH = 23;
     WINDOW_DATA = 24;
+    HBASE_DATA = 101;
   }
   optional LayerType type = 5; // the layer type from the enum above
 
