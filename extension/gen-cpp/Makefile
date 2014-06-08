@@ -1,4 +1,6 @@
-CC=gcc
+CXX=g++
+CFLAGS=-fPIC -O3
+CXXFLAGS=$(CFLAGS)
 AR=ar
 
 all: libHbase.a 
@@ -9,7 +11,7 @@ libHbase.a: Hbase.o Hbase_types.o Hbase_constants.o
 	$(AR) rcs deploy/lib/$@ $^
 
 ..cpp.o:
-	$(CC) -fPIC -O3 -c $<
+	$(CXX) $(CXXFLAGS) -c $<
 
 clean:
 	rm -fr demo deploy *.o *~
