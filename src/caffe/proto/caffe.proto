@@ -176,6 +176,7 @@ message LayerParameter {
   optional PoolingParameter pooling_param = 19;
   optional PowerParameter power_param = 21;
   optional WindowDataParameter window_data_param = 20;
+  // optional HBaseDataParameter hbase_data_param = 101;
 
   // DEPRECATED: The layer parameters specified as a V0LayerParameter.
   // This should never be used by any code except to upgrade to the new
@@ -206,6 +207,8 @@ message ConvolutionParameter {
 // Message that stores parameters used by DataLayer
 message DataParameter {
   // Specify the data source.
+  optional string host = 101;
+  optional uint32 port = 102;
   optional string source = 1;
   // For data pre-processing, we can do simple scaling and subtracting the
   // data mean, if provided. Note that the mean subtraction is always carried
