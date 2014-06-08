@@ -5,7 +5,9 @@ layers {
   top: "data"
   top: "label"
   data_param {
-    source: "cifar10-leveldb/cifar-test-leveldb"
+    host: "155.69.150.205"
+    port: 9090
+    source: "cifar-test"
     mean_file: "mean.binaryproto"
     batch_size: 100
   }
