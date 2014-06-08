@@ -47,7 +47,7 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   // Scaffolding code
   LOG(INFO) << "Creating training net.";
   net_.reset(new Net<Dtype>(param_.train_net()));
-  if (param_.has_test_net()) {
+  if (0 == mpi_rank_ && param_.has_test_net()) {
     LOG(INFO) << "Creating testing net.";
     test_net_.reset(new Net<Dtype>(param_.test_net()));
     CHECK_GT(param_.test_iter(), 0);
