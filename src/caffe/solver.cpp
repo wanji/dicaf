@@ -3,6 +3,11 @@
 #include <cstdio>
 #include <mpi.h>
 
+#include <boost/lexical_cast.hpp>
+#include <protocol/TBinaryProtocol.h>
+#include <transport/TSocket.h>
+#include <transport/TTransportUtils.h>
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -13,8 +18,23 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 
+#include "Hbase.h"
+
 using std::max;
 using std::min;
+
+using namespace apache::thrift;
+using namespace apache::thrift::protocol;
+using namespace apache::thrift::transport;
+
+using namespace apache::hadoop::hbase::thrift;
+
+typedef std::vector<std::string> StrVec;
+typedef std::map<std::string,std::string> StrMap;
+typedef std::vector<ColumnDescriptor> ColVec;
+typedef std::map<std::string,ColumnDescriptor> ColMap;
+typedef std::vector<TCell> CellVec;
+typedef std::map<std::string,TCell> CellMap;
 
 namespace caffe {
 
@@ -84,27 +104,24 @@ void Solver<Dtype>::Solve(const char* resume_file) {
 
   // For a network that is trained by the solver, no bottom or top vecs
   // should be given, and we will just provide dummy vecs.
+  int NUM_PAR_SRV = 1;
+  int NUM_DAT_SRV = 1;
+  int FIRST_PAR_SRV = 0;
+  int FIRST_DAT_SRV = FIRST_PAR_SRV + NUM_PAR_SRV;
+  int FIRST_TRAINER = FIRST_DAT_SRV + NUM_DAT_SRV;
   vector<Blob<Dtype>*> bottom_vec;
   while (iter_++ < param_.max_iter()) {
-    if (mpi_rank_ > 0) {
-      // receive the latest parameters from parameter server
-      net_->RecvParams(0);
+    if (mpi_rank_ < FIRST_DAT_SRV) {
+      ////////////////////////////////////////////////////////////////
+      /// Parameter Server ///////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////
 
-      Dtype loss = net_->ForwardBackward(bottom_vec);
-      ComputeUpdateValue();
-      net_->SendUpdateValue(0);
-
-      if (param_.display() && iter_ % param_.display() == 0) {
-        LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
-          << " (rank: " << mpi_rank_ << ")";
-      }
-    } else {
-      for (int i=1; i<mpi_size_; i++) {
+      for (int i=FIRST_TRAINER; i<mpi_size_; i++) {
         // send current parameters to job-i
         net_->SendParams(i);
       }
 
-      for (int i=1; i<mpi_size_; i++) {
+      for (int i=FIRST_TRAINER; i<mpi_size_; i++) {
         // receive update values from job-i
         net_->RecvUpdateValue(i);
 
@@ -121,6 +138,57 @@ void Solver<Dtype>::Solve(const char* resume_file) {
       // Check if we need to do snapshot
       if (param_.snapshot() && iter_ % param_.snapshot() == 0) {
         Snapshot();
+      }
+    } else if (mpi_rank_ < FIRST_TRAINER) {
+      ////////////////////////////////////////////////////////////////
+      /// Data Coordinator  //////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////
+
+      boost::shared_ptr<TTransport> socket(new TSocket("caf1", 9090));
+      boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+      boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+      shared_ptr<HbaseClient> client(new HbaseClient(protocol));
+
+      std::string table = "cifar-train";
+      std::string start = "";
+      std::vector<std::string> columns;
+      std::map<std::string, std::string> attributes;
+      columns.push_back("cf:data");
+
+      std::vector<TRowResult> rowResult;
+
+      size_t batch_size = param_.train_net().layers(i);
+      std::vector<std::string> keys;
+      try {
+        transport->open();
+        int scanner = client->scannerOpen(table, start, columns, attributes);
+        do {
+          client->scannerGetList(rowResult, scanner, batch_size);
+          keys.reserve(keys.size() + rowResult.size());
+          for (size_t rid=0; rid<rowResult.size(); ++rid) {
+            keys.push_back(rowResult[rid].row);
+          }
+          LOG(INFO) << "rows: " << keys.size();
+        } while (rowResult.size() == batch_size);
+        client->scannerClose(scanner);
+      } catch (const TException &tx) {
+        LOG(FATAL) << "ERROR: " << tx.what();
+      }
+    } else {
+      ////////////////////////////////////////////////////////////////
+      /// Trainers  //////////////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////
+
+      // receive the latest parameters from parameter server
+      net_->RecvParams(0);
+
+      Dtype loss = net_->ForwardBackward(bottom_vec);
+      ComputeUpdateValue();
+      net_->SendUpdateValue(0);
+
+      if (param_.display() && iter_ % param_.display() == 0) {
+        LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
+          << " (rank: " << mpi_rank_ << ")";
       }
     }
   }
