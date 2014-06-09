@@ -17,6 +17,7 @@
 #include "caffe/solver.hpp"
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
+#include "caffe/util/upgrade_proto.hpp"
 
 #include "Hbase.h"
 
@@ -64,21 +65,38 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
 
   fprintf(stderr, "my rank: %d / %d\n", mpi_rank_, mpi_size_); fflush(stderr);
 
+  NUM_PAR_SRV = 1;
+  NUM_DAT_SRV = 1;
+  TRAIN_BEGIN = NUM_PAR_SRV;
+  TRAIN_END = mpi_size_ - NUM_DAT_SRV;
+
   // Scaffolding code
-  LOG(INFO) << "Creating training net.";
-  net_.reset(new Net<Dtype>(param_.train_net()));
-  if (0 == mpi_rank_ && param_.has_test_net()) {
-    LOG(INFO) << "Creating testing net.";
-    test_net_.reset(new Net<Dtype>(param_.test_net()));
-    CHECK_GT(param_.test_iter(), 0);
-    CHECK_GT(param_.test_interval(), 0);
+  if (mpi_rank_ < NUM_PAR_SRV) {
+    LOG(INFO) << "Creating training net.";
+    net_.reset(new Net<Dtype>(param_.train_net()));
+
+    if (param_.has_test_net()) {
+      LOG(INFO) << "Creating testing net.";
+      test_net_.reset(new Net<Dtype>(param_.test_net()));
+      CHECK_GT(param_.test_iter(), 0);
+      CHECK_GT(param_.test_interval(), 0);
+    }
+    LOG(INFO) << "** Parameter server initialization done!";
+  } else if (mpi_rank_ >= TRAIN_END) {
+    LOG(INFO) << "** Data server initialization done!";
+  } else {
+    LOG(INFO) << "Creating training net.";
+    net_.reset(new Net<Dtype>(param_.train_net()));
+    LOG(INFO) << "** Trainer " << mpi_rank_ << " initialization done!";
   }
+
   LOG(INFO) << "Solver scaffolding done.";
 }
 
 
 template <typename Dtype>
 void Solver<Dtype>::Solve(const char* resume_file) {
+if (mpi_rank_ < TRAIN_END) {
   Caffe::set_mode(Caffe::Brew(param_.solver_mode()));
   if (param_.solver_mode() == SolverParameter_SolverMode_GPU &&
       param_.has_device_id()) {
@@ -93,103 +111,54 @@ void Solver<Dtype>::Solve(const char* resume_file) {
     LOG(INFO) << "Restoring previous solver status from " << resume_file;
     Restore(resume_file);
   }
+}
 
+  if (mpi_rank_ < NUM_PAR_SRV) {
+    RunParServer();
+  } else if (mpi_rank_ >= TRAIN_END) {
+    RunDatServer();
+  } else {
+    RunTrainer();
+  }
+}
+
+
+////////////////////////////////////////////////////////////////
+/// Parameter Server ///////////////////////////////////////////
+////////////////////////////////////////////////////////////////
+template <typename Dtype>
+void Solver<Dtype>::RunParServer() {
   // Run a test pass before doing any training to avoid waiting a potentially
   // very long time (param_.test_interval() training iterations) to report that
   // there's not enough memory to run the test net and crash, etc.; and to gauge
   // the effect of the first training iterations.
-  if (param_.test_interval() && mpi_rank_ == 0) {
+  if (param_.test_interval()) {
     Test();
   }
 
-  // For a network that is trained by the solver, no bottom or top vecs
-  // should be given, and we will just provide dummy vecs.
-  int NUM_PAR_SRV = 1;
-  int NUM_DAT_SRV = 1;
-  int FIRST_PAR_SRV = 0;
-  int FIRST_DAT_SRV = FIRST_PAR_SRV + NUM_PAR_SRV;
-  int FIRST_TRAINER = FIRST_DAT_SRV + NUM_DAT_SRV;
-  vector<Blob<Dtype>*> bottom_vec;
   while (iter_++ < param_.max_iter()) {
-    if (mpi_rank_ < FIRST_DAT_SRV) {
-      ////////////////////////////////////////////////////////////////
-      /// Parameter Server ///////////////////////////////////////////
-      ////////////////////////////////////////////////////////////////
+    for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
+      // send current parameters to job-i
+      net_->SendParams(i);
+    }
 
-      for (int i=FIRST_TRAINER; i<mpi_size_; i++) {
-        // send current parameters to job-i
-        net_->SendParams(i);
-      }
-
-      for (int i=FIRST_TRAINER; i<mpi_size_; i++) {
-        // receive update values from job-i
-        net_->RecvUpdateValue(i);
-
-        if (param_.display() && iter_ % param_.display() == 0) {
-          LOG(INFO) << "Got updates of Iter-" << iter_ << " from node " << i;
-        }
-
-        // update the values
-        net_->Update();
-      }
-      if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
-        Test();
-      }
-      // Check if we need to do snapshot
-      if (param_.snapshot() && iter_ % param_.snapshot() == 0) {
-        Snapshot();
-      }
-    } else if (mpi_rank_ < FIRST_TRAINER) {
-      ////////////////////////////////////////////////////////////////
-      /// Data Coordinator  //////////////////////////////////////////
-      ////////////////////////////////////////////////////////////////
-
-      boost::shared_ptr<TTransport> socket(new TSocket("caf1", 9090));
-      boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
-      boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
-      shared_ptr<HbaseClient> client(new HbaseClient(protocol));
-
-      std::string table = "cifar-train";
-      std::string start = "";
-      std::vector<std::string> columns;
-      std::map<std::string, std::string> attributes;
-      columns.push_back("cf:data");
-
-      std::vector<TRowResult> rowResult;
-
-      size_t batch_size = param_.train_net().layers(i);
-      std::vector<std::string> keys;
-      try {
-        transport->open();
-        int scanner = client->scannerOpen(table, start, columns, attributes);
-        do {
-          client->scannerGetList(rowResult, scanner, batch_size);
-          keys.reserve(keys.size() + rowResult.size());
-          for (size_t rid=0; rid<rowResult.size(); ++rid) {
-            keys.push_back(rowResult[rid].row);
-          }
-          LOG(INFO) << "rows: " << keys.size();
-        } while (rowResult.size() == batch_size);
-        client->scannerClose(scanner);
-      } catch (const TException &tx) {
-        LOG(FATAL) << "ERROR: " << tx.what();
-      }
-    } else {
-      ////////////////////////////////////////////////////////////////
-      /// Trainers  //////////////////////////////////////////////////
-      ////////////////////////////////////////////////////////////////
-
-      // receive the latest parameters from parameter server
-      net_->RecvParams(0);
-
-      Dtype loss = net_->ForwardBackward(bottom_vec);
-      ComputeUpdateValue();
-      net_->SendUpdateValue(0);
+    for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
+      // receive update values from job-i
+      net_->RecvUpdateValue(i);
 
       if (param_.display() && iter_ % param_.display() == 0) {
-        LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
-          << " (rank: " << mpi_rank_ << ")";
+        LOG(INFO) << "Got updates of Iter-" << iter_ << " from node " << i;
       }
+
+      // update the values
+      net_->Update();
+    }
+    if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
+      Test();
+    }
+    // Check if we need to do snapshot
+    if (param_.snapshot() && iter_ % param_.snapshot() == 0) {
+      Snapshot();
     }
   }
   // After the optimization is done, always do a snapshot.
@@ -198,6 +167,108 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   LOG(INFO) << "Optimization Done.";
 }
 
+////////////////////////////////////////////////////////////////
+/// Data Coordinator  //////////////////////////////////////////
+////////////////////////////////////////////////////////////////
+template <typename Dtype>
+void Solver<Dtype>::RunDatServer() {
+  std::vector<std::string> keys;
+  boost::shared_ptr<TTransport> socket(new TSocket("localhost", 9090));
+  boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+  boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+  shared_ptr<HbaseClient> client(new HbaseClient(protocol));
+
+  try {
+    transport->open();
+  } catch (const TException &tx) {
+    LOG(FATAL) << "ERROR: " << tx.what();
+  }
+
+  std::string table = "cifar-train";
+  std::string start = "";
+  std::vector<std::string> columns;
+  std::map<std::string, std::string> attributes;
+  columns.push_back("cf:data");
+
+  std::vector<TRowResult> rowResult;
+
+  NetParameter param;
+  ReadNetParamsFromTextFileOrDie(param_.train_net(), &param);
+  size_t batch_size = -1;
+  for (size_t lid=0; lid<param.layers_size(); ++lid) {
+    const LayerParameter_LayerType& type = param.layers(lid).type();
+    if (type == LayerParameter_LayerType_HBASE_DATA) {
+      batch_size = param.layers(lid).data_param().batch_size();
+      break;
+    }
+  }
+  if (batch_size < 0) {
+    LOG(FATAL) << "ERROR: " << "wrong batch size!";
+  }
+  size_t num_trainers = TRAIN_END - TRAIN_BEGIN;
+  size_t num_fetch = num_trainers * batch_size;
+  int scanner = client->scannerOpen(table, start, columns, attributes);
+  bool fetch_rows = true;
+  int kid = 0;
+  while (iter_++ < param_.max_iter()) {
+    // fetch fresh data
+    if (fetch_rows) {
+      client->scannerGetList(rowResult, scanner, batch_size);
+      if (rowResult.size() > 0) {
+        keys.reserve(keys.size() + rowResult.size());
+        for (size_t rid=0; rid<rowResult.size(); ++rid) {
+          keys.push_back(rowResult[rid].row);
+        }
+        DLOG(INFO) << "rows: " << keys.size();
+      }
+      if (rowResult.size() < batch_size) {
+        LOG(INFO) << "Got all row keys, close scanner.";
+        fetch_rows = false;
+        client->scannerClose(scanner);
+      }
+    }
+
+    // dispatch data
+    for (int i = TRAIN_BEGIN; i < TRAIN_END; ++i) {
+      kid %= keys.size();
+      int ret = MPI_Send(keys[kid].data(), keys[kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+      DLOG(INFO) << "Send start key to trainer: " << mpi_rank_ << " -> " << i << "(" << ret << ")";
+      DLOG(INFO) << keys[kid].data();
+      kid += batch_size;
+    }
+    for (int i = 0; i < TRAIN_BEGIN; ++i) {
+      kid %= keys.size();
+      int ret = MPI_Send(keys[kid].data(), keys[kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+      DLOG(INFO) << "Send start key to trainer: " << mpi_rank_ << " -> " << i << "(" << ret << ")";
+      DLOG(INFO) << keys[kid].data();
+      kid += batch_size;
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////
+/// Trainers  //////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////
+template <typename Dtype>
+void Solver<Dtype>::RunTrainer() {
+  // For a network that is trained by the solver, no bottom or top vecs
+  // should be given, and we will just provide dummy vecs.
+  vector<Blob<Dtype>*> bottom_vec;
+
+  while (iter_++ < param_.max_iter()) {
+    // receive the latest parameters from parameter server
+    net_->RecvParams(0);
+
+    Dtype loss = net_->ForwardBackward(bottom_vec);
+    ComputeUpdateValue();
+    net_->SendUpdateValue(0);
+
+    if (param_.display() && iter_ % param_.display() == 0) {
+      LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
+        << " (rank: " << mpi_rank_ << ")";
+    }
+  }
+}
 
 template <typename Dtype>
 void Solver<Dtype>::Test() {

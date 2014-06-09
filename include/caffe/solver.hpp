@@ -41,6 +41,15 @@ class Solver {
   void Restore(const char* resume_file);
   virtual void RestoreSolverState(const SolverState& state) = 0;
 
+  // Roles
+  virtual void RunParServer();
+  virtual void RunDatServer();
+  virtual void RunTrainer();
+  int NUM_PAR_SRV;
+  int NUM_DAT_SRV;
+  int TRAIN_BEGIN;
+  int TRAIN_END;
+
   SolverParameter param_;
   int iter_;
   shared_ptr<Net<Dtype> > net_;

@@ -172,10 +172,22 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   const int width = layer->datum_width_;
   const int size = layer->datum_size_;
   const Dtype* mean = layer->data_mean_.cpu_data();
-// int rank;
-// MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  int mpi_rank;
+  int mpi_size;
+  char start_buf[256];
+  MPI_Status stat;
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+  DLOG(INFO) << "Waiting for start key from data coordinator: "
+    << mpi_rank << " <- " << mpi_size - 1;
+  MPI_Recv(start_buf, sizeof(start_buf) / sizeof(start_buf[0]), MPI_CHAR, mpi_size - 1, 1, MPI_COMM_WORLD, &stat);
+  DLOG(INFO) << "Recveive start key from data coordinator: "
+    << mpi_rank << " <- " << mpi_size - 1 << " (" << start_buf << ")";
+
   // fetch data from HBase
-  int scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
+//int scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
+  int scanner = layer->client_->scannerOpen(layer->table_, start_buf,
       layer->columns_, layer->attributes_);
   unsigned int num_get = batch_size + 1;
   std::vector<TRowResult> data_batch;
