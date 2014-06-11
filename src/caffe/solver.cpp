@@ -63,7 +63,7 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size_);
 
-  fprintf(stderr, "my rank: %d / %d\n", mpi_rank_, mpi_size_); fflush(stderr);
+  LOG(INFO) << "my rank: " << mpi_rank_ << " / " << mpi_size_;
 
   NUM_PAR_SRV = 1;
   NUM_DAT_SRV = 1;
@@ -96,30 +96,33 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
 
 template <typename Dtype>
 void Solver<Dtype>::Solve(const char* resume_file) {
-if (mpi_rank_ < TRAIN_END) {
+// if (mpi_rank_ < TRAIN_END) {
   Caffe::set_mode(Caffe::Brew(param_.solver_mode()));
   if (param_.solver_mode() == SolverParameter_SolverMode_GPU &&
       param_.has_device_id()) {
     Caffe::SetDevice(param_.device_id());
   }
   Caffe::set_phase(Caffe::TRAIN);
-  LOG(INFO) << "Solving " << net_->name();
-  PreSolve();
+// }
 
   iter_ = 0;
-  if (resume_file) {
-    LOG(INFO) << "Restoring previous solver status from " << resume_file;
-    Restore(resume_file);
-  }
-}
-
   if (mpi_rank_ < NUM_PAR_SRV) {
+    LOG(INFO) << "Solving " << net_->name();
+
+    if (resume_file) {
+      LOG(INFO) << "Restoring previous solver status from " << resume_file;
+      Restore(resume_file);
+    }
     RunParServer();
   } else if (mpi_rank_ >= TRAIN_END) {
+    LOG(INFO) << "RunDatServer ...";
     RunDatServer();
   } else {
+    LOG(INFO) << "RunTrainer ...";
+    PreSolve();
     RunTrainer();
   }
+  LOG(INFO) << "Optimization Done. (rank: " << mpi_rank_ << ")";
 }
 
 
@@ -137,34 +140,43 @@ void Solver<Dtype>::RunParServer() {
   }
 
   while (iter_++ < param_.max_iter()) {
+    // MPI_Barrier(MPI_COMM_WORLD);
+DLOG(INFO) << "iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
+DLOG(INFO) << "iter-0(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       // send current parameters to job-i
       net_->SendParams(i);
     }
 
     for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
+DLOG(INFO) << "iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       // receive update values from job-i
       net_->RecvUpdateValue(i);
 
+DLOG(INFO) << "iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       if (param_.display() && iter_ % param_.display() == 0) {
         LOG(INFO) << "Got updates of Iter-" << iter_ << " from node " << i;
       }
+DLOG(INFO) << "iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
 
       // update the values
       net_->Update();
     }
+DLOG(INFO) << "iter-1-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
+DLOG(INFO) << "iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       Test();
     }
+DLOG(INFO) << "iter-2-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // Check if we need to do snapshot
     if (param_.snapshot() && iter_ % param_.snapshot() == 0) {
+DLOG(INFO) << "iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       Snapshot();
     }
   }
   // After the optimization is done, always do a snapshot.
   iter_--;
   Snapshot();
-  LOG(INFO) << "Optimization Done.";
 }
 
 ////////////////////////////////////////////////////////////////
@@ -172,7 +184,6 @@ void Solver<Dtype>::RunParServer() {
 ////////////////////////////////////////////////////////////////
 template <typename Dtype>
 void Solver<Dtype>::RunDatServer() {
-  std::vector<std::string> keys;
   boost::shared_ptr<TTransport> socket(new TSocket("localhost", 9090));
   boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
   boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
@@ -184,64 +195,112 @@ void Solver<Dtype>::RunDatServer() {
     LOG(FATAL) << "ERROR: " << tx.what();
   }
 
-  std::string table = "cifar-train";
-  std::string start = "";
   std::vector<std::string> columns;
   std::map<std::string, std::string> attributes;
   columns.push_back("cf:data");
 
   std::vector<TRowResult> rowResult;
 
-  NetParameter param;
-  ReadNetParamsFromTextFileOrDie(param_.train_net(), &param);
-  size_t batch_size = -1;
-  for (size_t lid=0; lid<param.layers_size(); ++lid) {
-    const LayerParameter_LayerType& type = param.layers(lid).type();
+  NetParameter train_param;
+  NetParameter test_param;
+  size_t train_batch_size = -1;
+  size_t test_batch_size = -1;
+  size_t num_trainers = TRAIN_END - TRAIN_BEGIN;
+  size_t train_fetch = -1;
+
+  bool train_fetch_rows = true;
+  bool test_fetch_rows = true;
+
+  int train_kid = 0;
+  int test_kid = 0;
+  std::vector<std::string> train_keys;
+  std::vector<std::string> test_keys;
+
+  int test_scanner = client->scannerOpen("cifar-test", "", columns, attributes);
+  int train_scanner = client->scannerOpen("cifar-train", "", columns, attributes);
+
+  ReadNetParamsFromTextFileOrDie(param_.train_net(), &train_param);
+  ReadNetParamsFromTextFileOrDie(param_.train_net(), &test_param);
+
+  for (size_t lid=0; lid<train_param.layers_size(); ++lid) {
+    const LayerParameter_LayerType& type = train_param.layers(lid).type();
     if (type == LayerParameter_LayerType_HBASE_DATA) {
-      batch_size = param.layers(lid).data_param().batch_size();
+      train_batch_size = train_param.layers(lid).data_param().batch_size();
       break;
     }
   }
-  if (batch_size < 0) {
-    LOG(FATAL) << "ERROR: " << "wrong batch size!";
+  for (size_t lid=0; lid<test_param.layers_size(); ++lid) {
+    const LayerParameter_LayerType& type = test_param.layers(lid).type();
+    if (type == LayerParameter_LayerType_HBASE_DATA) {
+      test_batch_size = test_param.layers(lid).data_param().batch_size();
+      break;
+    }
   }
-  size_t num_trainers = TRAIN_END - TRAIN_BEGIN;
-  size_t num_fetch = num_trainers * batch_size;
-  int scanner = client->scannerOpen(table, start, columns, attributes);
-  bool fetch_rows = true;
-  int kid = 0;
+  if (train_batch_size < 0) {
+    LOG(FATAL) << "ERROR: " << "wrong train batch size!";
+  }
+  if (test_batch_size < 0) {
+    LOG(FATAL) << "ERROR: " << "wrong test batch size!";
+  }
+  train_fetch = num_trainers * train_batch_size;
+
   while (iter_++ < param_.max_iter()) {
-    // fetch fresh data
-    if (fetch_rows) {
-      client->scannerGetList(rowResult, scanner, batch_size);
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // fetch fresh training data
+    if (train_fetch_rows) {
+      client->scannerGetList(rowResult, train_scanner, train_fetch);
       if (rowResult.size() > 0) {
-        keys.reserve(keys.size() + rowResult.size());
+        train_keys.reserve(train_keys.size() + rowResult.size());
         for (size_t rid=0; rid<rowResult.size(); ++rid) {
-          keys.push_back(rowResult[rid].row);
+          train_keys.push_back(rowResult[rid].row);
         }
-        DLOG(INFO) << "rows: " << keys.size();
+        DLOG(INFO) << "train rows: " << train_keys.size();
       }
-      if (rowResult.size() < batch_size) {
-        LOG(INFO) << "Got all row keys, close scanner.";
-        fetch_rows = false;
-        client->scannerClose(scanner);
+      if (rowResult.size() < train_fetch) {
+        LOG(INFO) << "Got all training row keys, close scanner.";
+        train_fetch_rows = false;
+        client->scannerClose(train_scanner);
       }
     }
 
-    // dispatch data
-    for (int i = TRAIN_BEGIN; i < TRAIN_END; ++i) {
-      kid %= keys.size();
-      int ret = MPI_Send(keys[kid].data(), keys[kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
-      DLOG(INFO) << "Send start key to trainer: " << mpi_rank_ << " -> " << i << "(" << ret << ")";
-      DLOG(INFO) << keys[kid].data();
-      kid += batch_size;
+    // fetch fresh test data
+    if (test_fetch_rows) {
+      client->scannerGetList(rowResult, test_scanner, test_batch_size);
+      if (rowResult.size() > 0) {
+        test_keys.reserve(test_keys.size() + rowResult.size());
+        for (size_t rid=0; rid<rowResult.size(); ++rid) {
+          test_keys.push_back(rowResult[rid].row);
+        }
+        DLOG(INFO) << "test rows: " << test_keys.size();
+      }
+      if (rowResult.size() < test_batch_size) {
+        LOG(INFO) << "Got all test row keys, close scanner.";
+        test_fetch_rows = false;
+        client->scannerClose(test_scanner);
+      }
     }
-    for (int i = 0; i < TRAIN_BEGIN; ++i) {
-      kid %= keys.size();
-      int ret = MPI_Send(keys[kid].data(), keys[kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
-      DLOG(INFO) << "Send start key to trainer: " << mpi_rank_ << " -> " << i << "(" << ret << ")";
-      DLOG(INFO) << keys[kid].data();
-      kid += batch_size;
+
+    // dispatch training data
+    for (int i = TRAIN_BEGIN; i < TRAIN_END; ++i) {
+      train_kid %= train_keys.size();
+      LOG(INFO) << "Send start key to trainer: " << mpi_rank_ << " -> " << i << "(" << 0 << ")" << " " << train_kid << ": " << train_keys.size();
+      int ret = MPI_Send(train_keys[train_kid].data(), train_keys[train_kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+      LOG(INFO) << "Send start key to trainer: " << mpi_rank_ << " -> " << i << "(" << ret << ")" << " " << train_keys[train_kid];
+      train_kid += train_batch_size;
+    }
+
+    // dispatch test data
+    if (iter_ == 1 || param_.test_interval() && iter_ % param_.test_interval() == 0) {
+      for (int i = 0; i < TRAIN_BEGIN; ++i) {
+        test_kid %= test_keys.size();
+        int ret = 0;
+        for (int j = 0; j < 500; ++j) {
+          ret += MPI_Send(test_keys[test_kid].data(), test_keys[test_kid].size(), MPI_CHAR, i, 2, MPI_COMM_WORLD);
+        }
+        DLOG(INFO) << "Send start key to tester: " << mpi_rank_ << " -> " << i << "(" << ret << ")";
+        DLOG(INFO) << test_keys[test_kid].data();
+        test_kid += test_batch_size;
+      }
     }
   }
 }
@@ -256,17 +315,24 @@ void Solver<Dtype>::RunTrainer() {
   vector<Blob<Dtype>*> bottom_vec;
 
   while (iter_++ < param_.max_iter()) {
+    // MPI_Barrier(MPI_COMM_WORLD);
+    DLOG(INFO) << "iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // receive the latest parameters from parameter server
     net_->RecvParams(0);
 
     Dtype loss = net_->ForwardBackward(bottom_vec);
+    DLOG(INFO) << "iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     ComputeUpdateValue();
+    DLOG(INFO) << "iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     net_->SendUpdateValue(0);
+    DLOG(INFO) << "iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
 
     if (param_.display() && iter_ % param_.display() == 0) {
+    DLOG(INFO) << "iter-4: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
         << " (rank: " << mpi_rank_ << ")";
     }
+    DLOG(INFO) << "iter-5: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
   }
 }
 
@@ -434,6 +500,7 @@ void SGDSolver<Dtype>::ComputeUpdateValue() {
       // Compute the value to history, and then copy them to the blob's diff.
       Dtype local_rate = rate * net_params_lr[param_id];
       Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
+
       caffe_gpu_axpby(net_params[param_id]->count(), local_rate,
           net_params[param_id]->gpu_diff(), momentum,
           history_[param_id]->mutable_gpu_data());

@@ -410,12 +410,14 @@ void Net<Dtype>::SendParams(int rank) {
   switch (Caffe::mode()) {
   case Caffe::CPU:
     for (int i = 0; i < params_.size(); ++i) {
-      MPI_Send(params_[i]->cpu_data(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD);
+      MPI_Send(params_[i]->cpu_data(), params_[i]->count(), MPI_FLOAT, rank, 3, MPI_COMM_WORLD);
     }
     break;
   case Caffe::GPU:
     for (int i = 0; i < params_.size(); ++i) {
-      MPI_Send(params_[i]->gpu_data(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD);
+    DLOG(INFO) << "++++ send param: " << i << "/" << params_.size()
+      << params_[i]->count();
+      MPI_Send(params_[i]->gpu_data(), params_[i]->count(), MPI_FLOAT, rank, 3, MPI_COMM_WORLD);
     }
     break;
   default:
@@ -429,12 +431,14 @@ void Net<Dtype>::RecvParams(int rank) {
   switch (Caffe::mode()) {
   case Caffe::CPU:
     for (int i = 0; i < params_.size(); ++i) {
-      MPI_Recv(params_[i]->mutable_cpu_data(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD, &stat);
+      MPI_Recv(params_[i]->mutable_cpu_data(), params_[i]->count(), MPI_FLOAT, rank, 3, MPI_COMM_WORLD, &stat);
     }
     break;
   case Caffe::GPU:
     for (int i = 0; i < params_.size(); ++i) {
-      MPI_Recv(params_[i]->mutable_gpu_data(), params_[i]->count(), MPI_FLOAT, rank, 1, MPI_COMM_WORLD, &stat);
+    DLOG(INFO) << "++++ recv param: " << i << "/" << params_.size()
+      << params_[i]->count();
+      MPI_Recv(params_[i]->mutable_gpu_data(), params_[i]->count(), MPI_FLOAT, rank, 3, MPI_COMM_WORLD, &stat);
     }
     break;
   default:

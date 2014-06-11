@@ -210,6 +210,9 @@ message DataParameter {
   optional string host = 101;
   optional uint32 port = 102;
   optional string source = 1;
+  // 1: training set, 2: test set
+  optional uint32 mpi_tag = 103;
+
   // For data pre-processing, we can do simple scaling and subtracting the
   // data mean, if provided. Note that the mean subtraction is always carried
   // out before scaling.

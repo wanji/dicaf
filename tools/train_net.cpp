@@ -28,10 +28,13 @@ int main(int argc, char** argv) {
 
   LOG(INFO) << "Starting Optimization";
   SGDSolver<float> solver(solver_param);
+  int mpi_rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
   if (argc == 3) {
-    LOG(INFO) << "Resuming from " << argv[2];
+    LOG(INFO) << "Resuming from " << argv[2] << " (rank: " << mpi_rank << ")";
     solver.Solve(argv[2]);
   } else {
+    LOG(INFO) << "New optimization task" << " (rank: " << mpi_rank << ")";
     solver.Solve();
   }
   LOG(INFO) << "Optimization Done.";

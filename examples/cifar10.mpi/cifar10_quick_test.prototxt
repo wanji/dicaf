@@ -10,6 +10,7 @@ layers {
     source: "cifar-test"
     mean_file: "mean.binaryproto"
     batch_size: 100
+    mpi_tag: 2
   }
 }
 layers {

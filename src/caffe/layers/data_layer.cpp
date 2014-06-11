@@ -176,14 +176,21 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   int mpi_rank;
   int mpi_size;
   char start_buf[256];
+
   MPI_Status stat;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
   DLOG(INFO) << "Waiting for start key from data coordinator: "
-    << mpi_rank << " <- " << mpi_size - 1;
-  MPI_Recv(start_buf, sizeof(start_buf) / sizeof(start_buf[0]), MPI_CHAR, mpi_size - 1, 1, MPI_COMM_WORLD, &stat);
+    << mpi_rank << " <- " << mpi_size - 1
+    << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
+
+  memset(start_buf, 0, sizeof(start_buf));
+  MPI_Recv(start_buf, sizeof(start_buf) / sizeof(start_buf[0]), MPI_CHAR,
+      mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
+      MPI_COMM_WORLD, &stat);
   DLOG(INFO) << "Recveive start key from data coordinator: "
-    << mpi_rank << " <- " << mpi_size - 1 << " (" << start_buf << ")";
+    << mpi_rank << " <- " << mpi_size - 1
+    << " (" << start_buf << ")" << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
 
   // fetch data from HBase
 //int scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
@@ -193,22 +200,22 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   std::vector<TRowResult> data_batch;
   data_batch.reserve(num_get);
   std::vector<TRowResult> rowResult;
-// DLOG(INFO) << "out : " << data_batch.size() << "/" << num_get << ", rank: " << rank;
+DLOG(INFO) << "out : " << data_batch.size() << "/" << num_get << ", rank: " << mpi_rank;
   while (data_batch.size() < num_get) {
-// DLOG(INFO) << data_batch.size() << "/" << num_get << ", rank: " << rank;
+DLOG(INFO) << data_batch.size() << "/" << num_get << ", rank: " << mpi_rank;
     size_t rest = num_get - data_batch.size();
     layer->client_->scannerGetList(rowResult, scanner, rest);
     if (rowResult.size() < rest) {
       // We have reached the end. Restart from the first.
-// DLOG(INFO) << rowResult.size() << "/" << rest << ", rank: " << rank;
+DLOG(INFO) << rowResult.size() << "/" << rest << ", rank: " << mpi_rank;
       layer->ResetScanner();
       scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
       layer->columns_, layer->attributes_);
     }
     data_batch.insert(data_batch.end(), rowResult.begin(), rowResult.end());
   }
-// DLOG(INFO) << "out" << ", rank: " << rank;
-  layer->start_ = rowResult[rowResult.size() - 1].row;
+DLOG(INFO) << "out" << ", rank: " << mpi_rank;
+  // layer->start_ = rowResult[rowResult.size() - 1].row;
   layer->client_->scannerClose(scanner);
 
   for (int item_id = 0; item_id < batch_size; ++item_id) {
@@ -274,6 +281,7 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
       top_label[item_id] = datum.label();
     }
   }
+DLOG(INFO) << "for-end" << "! rank: " << mpi_rank;
 
   return static_cast<void*>(NULL);
 }
@@ -428,17 +436,25 @@ unsigned int DataLayer<Dtype>::PrefetchRand() {
 template <typename Dtype>
 Dtype DataLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       vector<Blob<Dtype>*>* top) {
+int rank = -1;
+MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+DLOG(INFO) << "Forward_cpu. (rank " << rank << ")";
   // First, join the thread
   JoinPrefetchThread();
+DLOG(INFO) << "Forward_cpu. (rank " << rank << ")";
   // Copy the data
   caffe_copy(prefetch_data_->count(), prefetch_data_->cpu_data(),
              (*top)[0]->mutable_cpu_data());
+DLOG(INFO) << "Forward_cpu. (rank " << rank << ")";
   if (output_labels_) {
+DLOG(INFO) << "Forward_cpu. (rank " << rank << ")";
     caffe_copy(prefetch_label_->count(), prefetch_label_->cpu_data(),
                (*top)[1]->mutable_cpu_data());
   }
+DLOG(INFO) << "Forward_cpu. (rank " << rank << ")";
   // Start a new prefetch thread
   CreatePrefetchThread();
+DLOG(INFO) << "Forward_cpu. (rank " << rank << ")";
   return Dtype(0.);
 }
 
