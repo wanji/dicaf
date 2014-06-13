@@ -10,6 +10,11 @@
 #include <driver_types.h>  // cuda driver types
 #include <glog/logging.h>
 
+/**
+ * constant strings
+ */
+const char MPI_MSG_END_DATA_PREFETCH[] = "mpi_end_dat" ;
+
 // Disable the copy and assignment operator for a class.
 #define DISABLE_COPY_AND_ASSIGN(classname) \
 private:\

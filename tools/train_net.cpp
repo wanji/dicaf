@@ -26,7 +26,6 @@ int main(int argc, char** argv) {
   SolverParameter solver_param;
   ReadProtoFromTextFileOrDie(argv[1], &solver_param);
 
-  LOG(INFO) << "Starting Optimization";
   SGDSolver<float> solver(solver_param);
   int mpi_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
@@ -37,7 +36,7 @@ int main(int argc, char** argv) {
     LOG(INFO) << "New optimization task" << " (rank: " << mpi_rank << ")";
     solver.Solve();
   }
-  LOG(INFO) << "Optimization Done.";
+  DLOG(INFO) << "Optimization (DBG).";
 
   MPI_Finalize();
   return 0;

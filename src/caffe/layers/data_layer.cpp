@@ -188,9 +188,13 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   MPI_Recv(start_buf, sizeof(start_buf) / sizeof(start_buf[0]), MPI_CHAR,
       mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
       MPI_COMM_WORLD, &stat);
-  DLOG(INFO) << "Recveive start key from data coordinator: "
+  DLOG(INFO) << "Receive start key from data coordinator: "
     << mpi_rank << " <- " << mpi_size - 1
     << " (" << start_buf << ")" << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
+  if (0 == strcmp(MPI_MSG_END_DATA_PREFETCH, start_buf)) {
+    DLOG(INFO) << "ENDMSG Received!";
+    return static_cast<void*>(NULL);
+  }
 
   // fetch data from HBase
 //int scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
@@ -288,12 +292,15 @@ DLOG(INFO) << "for-end" << "! rank: " << mpi_rank;
 
 template <typename Dtype>
 DataLayer<Dtype>::~DataLayer<Dtype>() {
+  LOG(INFO) << "DAT-Wait-Join: " << this;
   JoinPrefetchThread();
+  LOG(INFO) << "DAT-Joint!";
 }
 
 template <typename Dtype>
 void DataLayer<Dtype>::SetUp(const vector<Blob<Dtype>*>& bottom,
       vector<Blob<Dtype>*>* top) {
+  LOG(INFO) << "SetUp: " << this;
   CHECK_EQ(bottom.size(), 0) << "Data Layer takes no input blobs.";
   CHECK_GE(top->size(), 1) << "Data Layer takes at least one blob as output.";
   CHECK_LE(top->size(), 2) << "Data Layer takes at most two blobs as output.";
