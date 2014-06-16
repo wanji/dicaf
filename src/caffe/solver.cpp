@@ -147,36 +147,37 @@ void Solver<Dtype>::RunParServer() {
 
   while (iter_++ < param_.max_iter()) {
     // MPI_Barrier(MPI_COMM_WORLD);
-DLOG(INFO) << "iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
-DLOG(INFO) << "iter-0(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter-Sending(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       // send current parameters to job-i
       net_->SendParams(i);
+DLOG(INFO) << "RunParServer_iter-Sent   (" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     }
 
     for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
-DLOG(INFO) << "iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       // receive update values from job-i
       net_->RecvUpdateValue(i);
 
-DLOG(INFO) << "iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       if (param_.display() && iter_ % param_.display() == 0) {
         LOG(INFO) << "Got updates of Iter-" << iter_ << " from node " << i;
       }
-DLOG(INFO) << "iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
 
       // update the values
       net_->Update();
     }
-DLOG(INFO) << "iter-1-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter-1-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
-DLOG(INFO) << "iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       Test();
     }
-DLOG(INFO) << "iter-2-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter-2-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // Check if we need to do snapshot
     if (param_.snapshot() && iter_ % param_.snapshot() == 0) {
-DLOG(INFO) << "iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+DLOG(INFO) << "RunParServer_iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       Snapshot();
     }
   }
@@ -252,6 +253,7 @@ void Solver<Dtype>::RunDatServer() {
   train_fetch = (TRAIN_END - TRAIN_BEGIN) * train_batch_size;
 
   while (iter_++ < param_.max_iter()) {
+DLOG(INFO) << "RunDatServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // MPI_Barrier(MPI_COMM_WORLD);
     // fetch fresh training data
     if (train_fetch_rows) {
@@ -270,6 +272,7 @@ void Solver<Dtype>::RunDatServer() {
       }
     } // end if
 
+DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // fetch fresh test data
     if (test_fetch_rows) {
       client->scannerGetList(rowResult, test_scanner, test_batch_size);
@@ -288,6 +291,7 @@ void Solver<Dtype>::RunDatServer() {
       }
     } // end if
 
+DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // dispatch training data
     for (int i = TRAIN_BEGIN; i < TRAIN_END; ++i) {
       train_kid %= train_keys.size();
@@ -301,6 +305,7 @@ void Solver<Dtype>::RunDatServer() {
       train_kid += train_batch_size;
     } // end for
 
+DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // dispatch test data
     if (iter_ == 1 || param_.test_interval() && iter_ % param_.test_interval() == 0) {
       for (int i = 0; i < TRAIN_BEGIN; ++i) {
@@ -347,23 +352,24 @@ void Solver<Dtype>::RunTrainer() {
 
   while (iter_++ < param_.max_iter()) {
     // MPI_Barrier(MPI_COMM_WORLD);
-    DLOG(INFO) << "iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    DLOG(INFO) << "RunTrainer_iter-Receiving: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // receive the latest parameters from parameter server
     net_->RecvParams(0);
+    DLOG(INFO) << "RunTrainer_iter-Received:  " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
 
     Dtype loss = net_->ForwardBackward(bottom_vec);
-    DLOG(INFO) << "iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    DLOG(INFO) << "RunTrainer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     ComputeUpdateValue();
-    DLOG(INFO) << "iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    DLOG(INFO) << "RunTrainer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     net_->SendUpdateValue(0);
-    DLOG(INFO) << "iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    DLOG(INFO) << "RunTrainer_iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
 
     if (param_.display() && iter_ % param_.display() == 0) {
-    DLOG(INFO) << "iter-4: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    DLOG(INFO) << "RunTrainer_iter-4: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
         << " (rank: " << mpi_rank_ << ")";
     }
-    DLOG(INFO) << "iter-5: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    DLOG(INFO) << "RunTrainer_iter-5: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
   }
 }
 

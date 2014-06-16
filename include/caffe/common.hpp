@@ -15,6 +15,11 @@
  */
 const char MPI_MSG_END_DATA_PREFETCH[] = "mpi_end_dat" ;
 
+/**
+ * constant parameters
+ */
+const size_t MPI_BUF_SIZE = 1024 * 32;
+
 // Disable the copy and assignment operator for a class.
 #define DISABLE_COPY_AND_ASSIGN(classname) \
 private:\
