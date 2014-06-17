@@ -236,32 +236,24 @@ void Solver<Dtype>::RunDatServer() {
   }
   LOG(INFO) << "HBase connection established!";
 
+  // table information
   std::vector<std::string> columns;
   std::map<std::string, std::string> attributes;
   columns.push_back("cf:data");
 
+  // store the scanned results
   std::vector<TRowResult> rowResult;
 
+  // parse network parameters
   NetParameter train_param;
   NetParameter test_param;
-  size_t train_batch_size = -1;
-  size_t test_batch_size = -1;
-  size_t train_fetch = -1;
-
-  bool train_fetch_rows = true;
-  bool test_fetch_rows = true;
-
-  int train_kid = 0;
-  int test_kid = 0;
-  std::vector<std::string> train_keys;
-  std::vector<std::string> test_keys;
-
-  int train_scanner = client->scannerOpen("cifar-train", "", columns, attributes);
-  int test_scanner = client->scannerOpen("cifar-test", "", columns, attributes);
-
   ReadNetParamsFromTextFileOrDie(param_.train_net(), &train_param);
   ReadNetParamsFromTextFileOrDie(param_.test_net(), &test_param);
 
+  // get test and training batch size
+  size_t train_batch_size = -1;
+  size_t test_batch_size = -1;
+  size_t train_fetch = -1;
   for (size_t lid=0; lid<train_param.layers_size(); ++lid) {
     const LayerParameter_LayerType& type = train_param.layers(lid).type();
     if (type == LayerParameter_LayerType_HBASE_DATA) {
@@ -283,6 +275,26 @@ void Solver<Dtype>::RunDatServer() {
     LOG(FATAL) << "ERROR: " << "wrong test batch size!";
   }
   train_fetch = (TRAIN_END - TRAIN_BEGIN) * train_batch_size;
+
+  LOG(INFO) << "Test batch size: " << test_batch_size;
+  LOG(INFO) << "Training batch size: " << train_batch_size;
+  LOG(INFO) << "Fetch " << train_fetch << " row keys for training per iteration.";
+
+  // fetch row keys from HBase
+  bool train_fetch_rows = true;
+  bool test_fetch_rows = true;
+  int train_kid = 0;
+  int test_kid = 0;
+  std::vector<std::string> train_keys;
+  std::vector<std::string> test_keys;
+
+  // initialize the scanners
+  int train_scanner = client->scannerOpen("cifar-train", "", columns, attributes);
+  int test_scanner = client->scannerOpen("cifar-test", "", columns, attributes);
+
+  // MPI related 
+  char message[256];
+  MPI_Status stat;
 
   while (iter_++ < param_.max_iter()) {
 DLOG(INFO) << "RunDatServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
@@ -329,8 +341,18 @@ DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " 
       DLOG(INFO) << "Sending start key to trainer: "
         << mpi_rank_ << " -> " << i
         << " " << train_kid << ": " << train_keys.size();
-      int ret = MPI_Send(train_keys[train_kid].data(),
-          train_keys[train_kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+
+      int ret = MPI_Sendrecv(train_keys[train_kid].data(),
+          train_keys[train_kid].size(), MPI_CHAR, i, 1,
+          message, sizeof(message), MPI_CHAR, i, 1,
+          MPI_COMM_WORLD, &stat);
+
+      // int ret = MPI_Send(train_keys[train_kid].data(),
+      //     train_keys[train_kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+      if (MPI_SUCCESS != ret) {
+        LOG(FATAL) << "MPI_Recv failed";
+      }
+
       DLOG(INFO) << "Sent: " << ret << "(" << mpi_rank_ << " -> " << i << ") "
         << train_keys[train_kid];
       train_kid += train_batch_size;
@@ -345,8 +367,18 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
           DLOG(INFO) << "Sending start key to tester: "
             << mpi_rank_ << " -> " << i << "(" << j << "-th)"
             << " " << test_kid << ": " << test_keys.size();
-          int ret = MPI_Send(test_keys[test_kid].data(),
-              test_keys[test_kid].size(), MPI_CHAR, i, 2, MPI_COMM_WORLD);
+
+          int ret = MPI_Sendrecv(test_keys[test_kid].data(),
+              test_keys[test_kid].size(), MPI_CHAR, i, 2,
+              message, sizeof(message), MPI_CHAR, i, 2,
+              MPI_COMM_WORLD, &stat);
+
+          // int ret = MPI_Send(test_keys[test_kid].data(),
+          //     test_keys[test_kid].size(), MPI_CHAR, i, 2, MPI_COMM_WORLD);
+          if (MPI_SUCCESS != ret) {
+            LOG(FATAL) << "MPI_Recv failed";
+          }
+
           DLOG(INFO) << "Sent: " << ret << "(" << mpi_rank_ << " -> " << i << ") "
             << "(" << j << "-th)" << test_keys[test_kid];
           test_kid += test_batch_size;
@@ -359,15 +391,32 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
   DLOG(INFO) << "Post processing 1/2 ...";
 
   for (int i = 0; i < TRAIN_END; ++i) {
-    int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
-        sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+    int ret = MPI_Sendrecv(train_keys[train_kid].data(),
+        train_keys[train_kid].size(), MPI_CHAR, i, 1,
+        message, sizeof(message), MPI_CHAR, i, 1,
+        MPI_COMM_WORLD, &stat);
+    if (MPI_SUCCESS != ret) {
+      LOG(FATAL) << "MPI_Recv failed";
+    }
+
+    // int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
+    //     sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 1, MPI_COMM_WORLD);
   } // end for
 
   DLOG(INFO) << "Post processing 2/2 ...";
 
   for (int i = 0; i < TRAIN_BEGIN; ++i) {
-    int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
-        sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 2, MPI_COMM_WORLD);
+    int ret = MPI_Sendrecv(test_keys[test_kid].data(),
+        test_keys[test_kid].size(), MPI_CHAR, i, 2,
+        message, sizeof(message), MPI_CHAR, i, 2,
+        MPI_COMM_WORLD, &stat);
+    if (MPI_SUCCESS != ret) {
+      LOG(FATAL) << "MPI_Recv failed";
+    }
+
+
+    // int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
+    //     sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 2, MPI_COMM_WORLD);
   } // end for
 
   DLOG(INFO) << "Post processing done!";
