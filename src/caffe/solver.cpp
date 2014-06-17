@@ -187,6 +187,38 @@ DLOG(INFO) << "RunParServer_iter-3: " << iter_ << "/" << param_.max_iter() << " 
 }
 
 ////////////////////////////////////////////////////////////////
+/// Trainers  //////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////
+template <typename Dtype>
+void Solver<Dtype>::RunTrainer() {
+  // For a network that is trained by the solver, no bottom or top vecs
+  // should be given, and we will just provide dummy vecs.
+  vector<Blob<Dtype>*> bottom_vec;
+
+  while (iter_++ < param_.max_iter()) {
+    DLOG(INFO) << "RunTrainer_iter-Receiving: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    // receive the latest parameters from parameter server
+    net_->RecvParams(0);
+    DLOG(INFO) << "RunTrainer_iter-Received:  " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    //MPI_Barrier(MPI_COMM_WORLD);
+
+    Dtype loss = net_->ForwardBackward(bottom_vec);
+    DLOG(INFO) << "RunTrainer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    ComputeUpdateValue();
+    DLOG(INFO) << "RunTrainer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    net_->SendUpdateValue(0);
+    DLOG(INFO) << "RunTrainer_iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+
+    if (param_.display() && iter_ % param_.display() == 0) {
+    DLOG(INFO) << "RunTrainer_iter-4: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+      LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
+        << " (rank: " << mpi_rank_ << ")";
+    }
+    DLOG(INFO) << "RunTrainer_iter-5: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+  }
+}
+
+////////////////////////////////////////////////////////////////
 /// Data Coordinator  //////////////////////////////////////////
 ////////////////////////////////////////////////////////////////
 template <typename Dtype>
@@ -339,38 +371,6 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
   } // end for
 
   DLOG(INFO) << "Post processing done!";
-}
-
-////////////////////////////////////////////////////////////////
-/// Trainers  //////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////
-template <typename Dtype>
-void Solver<Dtype>::RunTrainer() {
-  // For a network that is trained by the solver, no bottom or top vecs
-  // should be given, and we will just provide dummy vecs.
-  vector<Blob<Dtype>*> bottom_vec;
-
-  while (iter_++ < param_.max_iter()) {
-    DLOG(INFO) << "RunTrainer_iter-Receiving: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    // receive the latest parameters from parameter server
-    net_->RecvParams(0);
-    DLOG(INFO) << "RunTrainer_iter-Received:  " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    //MPI_Barrier(MPI_COMM_WORLD);
-
-    Dtype loss = net_->ForwardBackward(bottom_vec);
-    DLOG(INFO) << "RunTrainer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    ComputeUpdateValue();
-    DLOG(INFO) << "RunTrainer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    net_->SendUpdateValue(0);
-    DLOG(INFO) << "RunTrainer_iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-
-    if (param_.display() && iter_ % param_.display() == 0) {
-    DLOG(INFO) << "RunTrainer_iter-4: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-      LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
-        << " (rank: " << mpi_rank_ << ")";
-    }
-    DLOG(INFO) << "RunTrainer_iter-5: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-  }
 }
 
 template <typename Dtype>
