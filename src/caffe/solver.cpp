@@ -146,7 +146,6 @@ void Solver<Dtype>::RunParServer() {
   }
 
   while (iter_++ < param_.max_iter()) {
-    // MPI_Barrier(MPI_COMM_WORLD);
 DLOG(INFO) << "RunParServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
 DLOG(INFO) << "RunParServer_iter-Sending(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
@@ -154,6 +153,7 @@ DLOG(INFO) << "RunParServer_iter-Sending(" << i << "): " << iter_ << "/" << para
       net_->SendParams(i);
 DLOG(INFO) << "RunParServer_iter-Sent   (" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     }
+    //MPI_Barrier(MPI_COMM_WORLD);
 
     for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
 DLOG(INFO) << "RunParServer_iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
@@ -254,7 +254,6 @@ void Solver<Dtype>::RunDatServer() {
 
   while (iter_++ < param_.max_iter()) {
 DLOG(INFO) << "RunDatServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    // MPI_Barrier(MPI_COMM_WORLD);
     // fetch fresh training data
     if (train_fetch_rows) {
       client->scannerGetList(rowResult, train_scanner, train_fetch);
@@ -322,6 +321,7 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
         }
       }
     }
+    //MPI_Barrier(MPI_COMM_WORLD);
   } // end while
 
   DLOG(INFO) << "Post processing 1/2 ...";
@@ -351,11 +351,11 @@ void Solver<Dtype>::RunTrainer() {
   vector<Blob<Dtype>*> bottom_vec;
 
   while (iter_++ < param_.max_iter()) {
-    // MPI_Barrier(MPI_COMM_WORLD);
     DLOG(INFO) << "RunTrainer_iter-Receiving: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // receive the latest parameters from parameter server
     net_->RecvParams(0);
     DLOG(INFO) << "RunTrainer_iter-Received:  " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    //MPI_Barrier(MPI_COMM_WORLD);
 
     Dtype loss = net_->ForwardBackward(bottom_vec);
     DLOG(INFO) << "RunTrainer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";

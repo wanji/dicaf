@@ -175,7 +175,8 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
 
   int mpi_rank;
   int mpi_size;
-  char start_buf[256];
+  const size_t buf_size = 256;
+  char start_buf[buf_size];
 
   MPI_Status stat;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
@@ -184,8 +185,9 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
     << mpi_rank << " <- " << mpi_size - 1
     << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
 
-  memset(start_buf, 0, sizeof(start_buf));
-  MPI_Recv(start_buf, sizeof(start_buf) / sizeof(start_buf[0]), MPI_CHAR,
+  DLOG(INFO) << "size: " << sizeof(start_buf) << ", per: " << sizeof(start_buf[0]);
+  memset(start_buf, 0, buf_size);
+  MPI_Recv(start_buf, buf_size, MPI_CHAR,
       mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
       MPI_COMM_WORLD, &stat);
   DLOG(INFO) << "Receive start key from data coordinator: "

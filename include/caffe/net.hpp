@@ -56,31 +56,10 @@ class Net {
   // Updates the network weights based on the diff values computed.
   void Update();
 
-  // Send data
-  inline void SendData(const Dtype * buf, size_t bufsize, int target, int tag) const {
-    size_t rest = bufsize;
-    size_t num_per_time = MPI_BUF_SIZE / sizeof(Dtype);
-    while (rest > 0) {
-      size_t curs = std::min(rest, num_per_time);
-      int ret = MPI_Send(buf, curs, MPI_FLOAT,
-          target, tag, MPI_COMM_WORLD);
-      rest -= curs;
-      DLOG(INFO) << "ret: " << ret;
-    }
-  }
+  int SendData(const Dtype * buf, size_t bufsize, int target, int tag) const;
 
   // Receive data
-  inline void RecvData(Dtype * buf, size_t bufsize, int source, int tag) {
-    MPI_Status stat;
-    size_t rest = bufsize;
-    size_t num_per_time = MPI_BUF_SIZE / sizeof(Dtype);
-    while (rest > 0) {
-      size_t curs = std::min(rest, num_per_time);
-      int ret = MPI_Recv(buf + bufsize - rest, curs, MPI_FLOAT,
-          source, tag, MPI_COMM_WORLD, &stat);
-      rest -= curs;
-    }
-  }
+  int RecvData(Dtype * buf, size_t bufsize, int source, int tag);
 
   // (Computing node)   Send update values to the parameter server
   void SendUpdateValue(int rank);
