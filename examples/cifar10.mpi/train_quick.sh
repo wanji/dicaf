@@ -2,7 +2,7 @@
 
 TOOLS=../../build/tools
 
-MV4_DEBUG_CORESIZE=unlimited MV2_DEBUG_SHOW_BACKTRACE=1 
+# MV4_DEBUG_CORESIZE=unlimited MV2_DEBUG_SHOW_BACKTRACE=1 
 MV2_USE_CUDA=1 GLOG_logtostderr=1 mpirun -n 6 $TOOLS/train_net.bin cifar10_quick_solver.prototxt
 
 #reduce learning rate by fctor of 10 after 8 epochs
