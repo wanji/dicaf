@@ -294,6 +294,7 @@ void Solver<Dtype>::RunDatServer() {
   int train_scanner = client->scannerOpen("cifar-train", "", columns, attributes);
   int test_scanner = client->scannerOpen("cifar-test", "", columns, attributes);
 
+#if PREFETCH_ROW_KEYS
   size_t fetch_num = 1024;
 
   do {
@@ -323,47 +324,50 @@ void Solver<Dtype>::RunDatServer() {
   LOG(INFO) << "Got all test row keys (" << test_keys.size()
     << "), close scanner.";
   client->scannerClose(test_scanner);
+#endif
 
   DLOG(INFO) << "iter/max_iter: " << iter_ << "/" << param_.max_iter();
   while (iter_++ < param_.max_iter()) {
 DLOG(INFO) << "RunDatServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-//    // fetch fresh training data
-//    if (train_fetch_rows) {
-//      client->scannerGetList(rowResult, train_scanner, train_fetch);
-//      if (rowResult.size() > 0) {
-//        train_keys.reserve(train_keys.size() + rowResult.size());
-//        for (size_t rid=0; rid<rowResult.size(); ++rid) {
-//          train_keys.push_back(rowResult[rid].row);
-//        }
-//      }
-//      if (rowResult.size() < train_fetch) {
-//        LOG(INFO) << "Got all training row keys (" << train_keys.size()
-//          << "), close scanner.";
-//        train_fetch_rows = false;
-//        client->scannerClose(train_scanner);
-//      }
-//    } // end if
-//
-//DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-//    // fetch fresh test data
-//    if (test_fetch_rows) {
-//      client->scannerGetList(rowResult, test_scanner, test_batch_size);
-//      if (rowResult.size() > 0) {
-//        test_keys.reserve(test_keys.size() + rowResult.size());
-//        for (size_t rid=0; rid<rowResult.size(); ++rid) {
-//          test_keys.push_back(rowResult[rid].row);
-//        }
-//        DLOG(INFO) << "test rows: " << test_keys.size();
-//      }
-//      if (rowResult.size() < test_batch_size) {
-//        LOG(INFO) << "Got all test row keys (" << test_keys.size()
-//          << "), close scanner.";
-//        test_fetch_rows = false;
-//        client->scannerClose(test_scanner);
-//      }
-//    } // end if
+#if !PREFETCH_ROW_KEYS
+    // fetch fresh training data
+    if (train_fetch_rows) {
+      client->scannerGetList(rowResult, train_scanner, train_fetch);
+      if (rowResult.size() > 0) {
+        train_keys.reserve(train_keys.size() + rowResult.size());
+        for (size_t rid=0; rid<rowResult.size(); ++rid) {
+          train_keys.push_back(rowResult[rid].row);
+        }
+      }
+      if (rowResult.size() < train_fetch) {
+        LOG(INFO) << "Got all training row keys (" << train_keys.size()
+          << "), close scanner.";
+        train_fetch_rows = false;
+        client->scannerClose(train_scanner);
+      }
+    } // end if
 
+DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    // fetch fresh test data
+    if (test_fetch_rows) {
+      client->scannerGetList(rowResult, test_scanner, test_batch_size);
+      if (rowResult.size() > 0) {
+        test_keys.reserve(test_keys.size() + rowResult.size());
+        for (size_t rid=0; rid<rowResult.size(); ++rid) {
+          test_keys.push_back(rowResult[rid].row);
+        }
+        DLOG(INFO) << "test rows: " << test_keys.size();
+      }
+      if (rowResult.size() < test_batch_size) {
+        LOG(INFO) << "Got all test row keys (" << test_keys.size()
+          << "), close scanner.";
+        test_fetch_rows = false;
+        client->scannerClose(test_scanner);
+      }
+    } // end if
 DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+#endif
+
     // dispatch training data
     for (int i = train_begin_; i < train_end_; ++i) {
       train_kid %= train_keys.size();

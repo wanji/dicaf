@@ -19,7 +19,9 @@
  * constant strings
  */
 const char MPI_MSG_END_DATA_PREFETCH[] = "mpi_end_dat";
-#define ENABLE_DATA_SERVER 1
+
+#define ENABLE_DATA_SERVER  1
+#define PREFETCH_ROW_KEYS   0
 
 const int  NUM_PAR_SRV = 1;
 const int  NUM_DAT_SRV = 1;
