@@ -421,7 +421,7 @@ void Net<Dtype>::SendUpdateValue(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ send update: " << i << "/" << params_.size() << ", "
       << params_[i]->count();
-      int ret = SendData(params_[i]->cpu_diff(), params_[i]->count(), rank, 11);
+      int ret = SendData(params_[i]->gpu_diff(), params_[i]->count(), rank, 11);
     DLOG(INFO) << "++++ sent update: " << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
@@ -448,7 +448,7 @@ void Net<Dtype>::RecvUpdateValue(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ recv update: " << i << "/" << params_.size() << ", "
       << params_[i]->count();
-      int ret = RecvData(params_[i]->mutable_cpu_diff(), params_[i]->count(), rank, 11);
+      int ret = RecvData(params_[i]->mutable_gpu_diff(), params_[i]->count(), rank, 11);
     DLOG(INFO) << "++++ recd update: " << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
@@ -476,12 +476,12 @@ void Net<Dtype>::SendParams(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ send param " << i << "/" << params_.size()
       << " to " << rank << ", "
-      << params_[i]->cpu_data() << ", " << params_[i]->count();
+      << params_[i]->gpu_data() << ", " << params_[i]->count();
 
-      int ret = SendData(params_[i]->cpu_data(), params_[i]->count(), rank, 12);
+      int ret = SendData(params_[i]->gpu_data(), params_[i]->count(), rank, 12);
 
     DLOG(INFO) << "++++ sent param: " << i << "/" << params_.size() << ", "
-      << params_[i]->cpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
+      << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
     }
     break;
   default:
@@ -508,12 +508,12 @@ void Net<Dtype>::RecvParams(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ recv param " << i << "/" << params_.size()
       << " from " << rank << ", "
-      << params_[i]->cpu_data() << ", " << params_[i]->count();
+      << params_[i]->gpu_data() << ", " << params_[i]->count();
 
-      int ret = RecvData(params_[i]->mutable_cpu_data(), params_[i]->count(), rank, 12);
+      int ret = RecvData(params_[i]->mutable_gpu_data(), params_[i]->count(), rank, 12);
 
     DLOG(INFO) << "++++ recd param: " << i << "/" << params_.size() << ", "
-      << params_[i]->cpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
+      << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
     }
     break;
   default:
