@@ -254,6 +254,7 @@ void Solver<Dtype>::RunDatServer() {
   size_t train_batch_size = -1;
   size_t test_batch_size = -1;
   size_t train_fetch = -1;
+  size_t test_iter = param_.test_iter();
   for (size_t lid=0; lid<train_param.layers_size(); ++lid) {
     const LayerParameter_LayerType& type = train_param.layers(lid).type();
     if (type == LayerParameter_LayerType_HBASE_DATA) {
@@ -279,6 +280,7 @@ void Solver<Dtype>::RunDatServer() {
   LOG(INFO) << "Test batch size: " << test_batch_size;
   LOG(INFO) << "Training batch size: " << train_batch_size;
   LOG(INFO) << "Fetch " << train_fetch << " row keys for training per iteration.";
+  LOG(INFO) << "Test-iter: " << test_iter;
 
   // fetch row keys from HBase
   bool train_fetch_rows = true;
@@ -288,51 +290,79 @@ void Solver<Dtype>::RunDatServer() {
   std::vector<std::string> train_keys;
   std::vector<std::string> test_keys;
 
+#if DBG_SEND
   // initialize the scanners
   int train_scanner = client->scannerOpen("cifar-train", "", columns, attributes);
   int test_scanner = client->scannerOpen("cifar-test", "", columns, attributes);
 
-  // MPI related 
-  char message[256];
-  MPI_Status stat;
+  size_t fetch_num = 1024;
 
-  while (iter_++ < param_.max_iter()) {
-DLOG(INFO) << "RunDatServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    // fetch fresh training data
-    if (train_fetch_rows) {
-      client->scannerGetList(rowResult, train_scanner, train_fetch);
+  do {
+      client->scannerGetList(rowResult, train_scanner, fetch_num);
       if (rowResult.size() > 0) {
         train_keys.reserve(train_keys.size() + rowResult.size());
         for (size_t rid=0; rid<rowResult.size(); ++rid) {
           train_keys.push_back(rowResult[rid].row);
         }
       }
-      if (rowResult.size() < train_fetch) {
-        LOG(INFO) << "Got all training row keys (" << train_keys.size()
-          << "), close scanner.";
-        train_fetch_rows = false;
-        client->scannerClose(train_scanner);
-      }
-    } // end if
+      LOG(INFO) << rowResult.size() << " training row keys fetched!";
+  } while (rowResult.size() == fetch_num);
+  LOG(INFO) << "Got all training row keys (" << train_keys.size()
+    << "), close scanner.";
+  client->scannerClose(train_scanner);
 
-DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    // fetch fresh test data
-    if (test_fetch_rows) {
-      client->scannerGetList(rowResult, test_scanner, test_batch_size);
+  do {
+      client->scannerGetList(rowResult, test_scanner, fetch_num);
       if (rowResult.size() > 0) {
         test_keys.reserve(test_keys.size() + rowResult.size());
         for (size_t rid=0; rid<rowResult.size(); ++rid) {
           test_keys.push_back(rowResult[rid].row);
         }
-        DLOG(INFO) << "test rows: " << test_keys.size();
       }
-      if (rowResult.size() < test_batch_size) {
-        LOG(INFO) << "Got all test row keys (" << test_keys.size()
-          << "), close scanner.";
-        test_fetch_rows = false;
-        client->scannerClose(test_scanner);
-      }
-    } // end if
+      LOG(INFO) << rowResult.size() << " test row keys fetched!";
+  } while (rowResult.size() == fetch_num);
+  LOG(INFO) << "Got all test row keys (" << test_keys.size()
+    << "), close scanner.";
+  client->scannerClose(test_scanner);
+
+  DLOG(INFO) << "iter/max_iter: " << iter_ << "/" << param_.max_iter();
+  while (iter_++ < param_.max_iter()) {
+DLOG(INFO) << "RunDatServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+//    // fetch fresh training data
+//    if (train_fetch_rows) {
+//      client->scannerGetList(rowResult, train_scanner, train_fetch);
+//      if (rowResult.size() > 0) {
+//        train_keys.reserve(train_keys.size() + rowResult.size());
+//        for (size_t rid=0; rid<rowResult.size(); ++rid) {
+//          train_keys.push_back(rowResult[rid].row);
+//        }
+//      }
+//      if (rowResult.size() < train_fetch) {
+//        LOG(INFO) << "Got all training row keys (" << train_keys.size()
+//          << "), close scanner.";
+//        train_fetch_rows = false;
+//        client->scannerClose(train_scanner);
+//      }
+//    } // end if
+//
+//DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+//    // fetch fresh test data
+//    if (test_fetch_rows) {
+//      client->scannerGetList(rowResult, test_scanner, test_batch_size);
+//      if (rowResult.size() > 0) {
+//        test_keys.reserve(test_keys.size() + rowResult.size());
+//        for (size_t rid=0; rid<rowResult.size(); ++rid) {
+//          test_keys.push_back(rowResult[rid].row);
+//        }
+//        DLOG(INFO) << "test rows: " << test_keys.size();
+//      }
+//      if (rowResult.size() < test_batch_size) {
+//        LOG(INFO) << "Got all test row keys (" << test_keys.size()
+//          << "), close scanner.";
+//        test_fetch_rows = false;
+//        client->scannerClose(test_scanner);
+//      }
+//    } // end if
 
 DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // dispatch training data
@@ -342,13 +372,9 @@ DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " 
         << mpi_rank_ << " -> " << i
         << " " << train_kid << ": " << train_keys.size();
 
-      int ret = MPI_Sendrecv(train_keys[train_kid].data(),
-          train_keys[train_kid].size(), MPI_CHAR, i, 1,
-          message, sizeof(message), MPI_CHAR, i, 1,
-          MPI_COMM_WORLD, &stat);
+      int ret = MPI_Ssend(train_keys[train_kid].data(),
+          train_keys[train_kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
 
-      // int ret = MPI_Send(train_keys[train_kid].data(),
-      //     train_keys[train_kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
       if (MPI_SUCCESS != ret) {
         LOG(FATAL) << "MPI_Recv failed";
       }
@@ -362,19 +388,15 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
     // dispatch test data
     if (iter_ == 1 || param_.test_interval() && iter_ % param_.test_interval() == 0) {
       for (int i = 0; i < TRAIN_BEGIN; ++i) {
-        for (int j = 0; j < 100; ++j) {
+        for (int j = 0; j < test_iter; ++j) {
           test_kid %= test_keys.size();
           DLOG(INFO) << "Sending start key to tester: "
             << mpi_rank_ << " -> " << i << "(" << j << "-th)"
             << " " << test_kid << ": " << test_keys.size();
 
-          int ret = MPI_Sendrecv(test_keys[test_kid].data(),
-              test_keys[test_kid].size(), MPI_CHAR, i, 2,
-              message, sizeof(message), MPI_CHAR, i, 2,
-              MPI_COMM_WORLD, &stat);
+          int ret = MPI_Ssend(test_keys[test_kid].data(),
+              test_keys[test_kid].size(), MPI_CHAR, i, 2, MPI_COMM_WORLD);
 
-          // int ret = MPI_Send(test_keys[test_kid].data(),
-          //     test_keys[test_kid].size(), MPI_CHAR, i, 2, MPI_COMM_WORLD);
           if (MPI_SUCCESS != ret) {
             LOG(FATAL) << "MPI_Recv failed";
           }
@@ -391,35 +413,27 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
   DLOG(INFO) << "Post processing 1/2 ...";
 
   for (int i = 0; i < TRAIN_END; ++i) {
-    int ret = MPI_Sendrecv(train_keys[train_kid].data(),
-        train_keys[train_kid].size(), MPI_CHAR, i, 1,
-        message, sizeof(message), MPI_CHAR, i, 1,
-        MPI_COMM_WORLD, &stat);
+    int ret = MPI_Ssend(MPI_MSG_END_DATA_PREFETCH,
+        sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+
     if (MPI_SUCCESS != ret) {
       LOG(FATAL) << "MPI_Recv failed";
     }
-
-    // int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
-    //     sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 1, MPI_COMM_WORLD);
   } // end for
 
   DLOG(INFO) << "Post processing 2/2 ...";
 
   for (int i = 0; i < TRAIN_BEGIN; ++i) {
-    int ret = MPI_Sendrecv(test_keys[test_kid].data(),
-        test_keys[test_kid].size(), MPI_CHAR, i, 2,
-        message, sizeof(message), MPI_CHAR, i, 2,
-        MPI_COMM_WORLD, &stat);
+    int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
+        sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 2, MPI_COMM_WORLD);
+
     if (MPI_SUCCESS != ret) {
       LOG(FATAL) << "MPI_Recv failed";
     }
-
-
-    // int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
-    //     sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 2, MPI_COMM_WORLD);
   } // end for
 
   DLOG(INFO) << "Post processing done!";
+#endif
 }
 
 template <typename Dtype>

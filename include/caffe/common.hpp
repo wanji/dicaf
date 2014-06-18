@@ -14,6 +14,7 @@
  * constant strings
  */
 const char MPI_MSG_END_DATA_PREFETCH[] = "mpi_end_dat" ;
+#define DBG_SEND 1
 
 /**
  * constant parameters

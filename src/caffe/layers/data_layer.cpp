@@ -176,7 +176,7 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   int mpi_rank;
   int mpi_size;
   const size_t buf_size = 256;
-  char start_buf[buf_size];
+  static char start_buf[buf_size] = "";
   const std::string message("OK");
 
   MPI_Status stat;
@@ -188,15 +188,11 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
 
   DLOG(INFO) << "size: " << sizeof(start_buf) << ", per: " << sizeof(start_buf[0]);
   memset(start_buf, 0, buf_size);
-  int ret = MPI_Sendrecv(message.data(), message.size(), MPI_CHAR,
-      mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
-      start_buf, buf_size, MPI_CHAR,
+
+#if DBG_SEND
+  int ret = MPI_Recv(start_buf, buf_size, MPI_CHAR,
       mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
       MPI_COMM_WORLD, &stat);
-
-  // int ret = MPI_Recv(start_buf, buf_size, MPI_CHAR,
-  //     mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
-  //     MPI_COMM_WORLD, &stat);
 
   if (MPI_SUCCESS != ret) {
     LOG(FATAL) << "MPI_Recv failed";
@@ -204,6 +200,7 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   DLOG(INFO) << "Receive start key from data coordinator: "
     << mpi_rank << " <- " << mpi_size - 1
     << " (" << start_buf << ")" << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
+#endif
   if (0 == strcmp(MPI_MSG_END_DATA_PREFETCH, start_buf)) {
     DLOG(INFO) << "ENDMSG Received!";
     return static_cast<void*>(NULL);

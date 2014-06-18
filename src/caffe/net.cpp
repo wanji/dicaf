@@ -371,13 +371,11 @@ void Net<Dtype>::Update() {
 // Send data
 template <typename Dtype>
 int Net<Dtype>::SendData(const Dtype * buf, size_t bufsize, int target, int tag) const {
-float * p = new float[1024*1024];
   size_t rest = bufsize;
   size_t num_per_time = MPI_BUF_SIZE / sizeof(Dtype);
   while (rest > 0) {
     size_t curs = std::min(rest, num_per_time);
-    // int ret = MPI_Send(buf + bufsize - rest, curs, MPI_FLOAT,
-    int ret = MPI_Send(p + bufsize - rest, curs, MPI_FLOAT,
+    int ret = MPI_Ssend(buf + bufsize - rest, curs, MPI_FLOAT,
         target, tag, MPI_COMM_WORLD);
     if (ret != MPI_SUCCESS) {
       return ret;
@@ -385,21 +383,18 @@ float * p = new float[1024*1024];
     rest -= curs;
     DLOG(INFO) << "rest: " << rest;
   }
-delete [] p;
   return MPI_SUCCESS;
 }
 
 // Receive data
 template <typename Dtype>
 int Net<Dtype>::RecvData(Dtype * buf, size_t bufsize, int source, int tag) {
-float * p = new float[1024*1024];
   MPI_Status stat;
   size_t rest = bufsize;
   size_t num_per_time = MPI_BUF_SIZE / sizeof(Dtype);
   while (rest > 0) {
     size_t curs = std::min(rest, num_per_time);
-    // int ret = MPI_Recv(buf + bufsize - rest, curs, MPI_FLOAT,
-    int ret = MPI_Recv(p + bufsize - rest, curs, MPI_FLOAT,
+    int ret = MPI_Recv(buf + bufsize - rest, curs, MPI_FLOAT,
         source, tag, MPI_COMM_WORLD, &stat);
     if (ret != MPI_SUCCESS) {
       return ret;
@@ -407,7 +402,6 @@ float * p = new float[1024*1024];
     rest -= curs;
     DLOG(INFO) << "rest: " << rest;
   }
-delete [] p;
   return MPI_SUCCESS;
 }
 
