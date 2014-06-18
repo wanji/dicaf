@@ -45,10 +45,8 @@ class Solver {
   virtual void RunParServer();
   virtual void RunDatServer();
   virtual void RunTrainer();
-  int NUM_PAR_SRV;
-  int NUM_DAT_SRV;
-  int TRAIN_BEGIN;
-  int TRAIN_END;
+  int train_begin_;
+  int train_end_;
 
   SolverParameter param_;
   int iter_;

@@ -156,12 +156,12 @@ class HBaseDataLayer : public DataLayer<Dtype> {
 
  protected:
   virtual void CreatePrefetchThread();
-  virtual void ResetScanner();
+  virtual void ResetStartBuf();
 
   shared_ptr<HbaseClient> client_;
 
   std::string table_;
-  std::string start_;
+  char start_buf_[256];
   std::vector<std::string> columns_;
   std::map<std::string, std::string> attributes_;
 };

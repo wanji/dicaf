@@ -370,12 +370,12 @@ void Net<Dtype>::Update() {
 
 // Send data
 template <typename Dtype>
-int Net<Dtype>::SendData(const Dtype * buf, size_t bufsize, int target, int tag) const {
-  size_t rest = bufsize;
-  size_t num_per_time = MPI_BUF_SIZE / sizeof(Dtype);
+int Net<Dtype>::SendData(const Dtype * buf, size_t bufcnt, int target, int tag) const {
+  size_t rest = bufcnt;
+  size_t cnt_per_send = MPI_BUF_SIZE / sizeof(Dtype);
   while (rest > 0) {
-    size_t curs = std::min(rest, num_per_time);
-    int ret = MPI_Ssend(buf + bufsize - rest, curs, MPI_FLOAT,
+    size_t curs = std::min(rest, cnt_per_send);
+    int ret = MPI_Ssend(buf + bufcnt - rest, curs, MPI_FLOAT,
         target, tag, MPI_COMM_WORLD);
     if (ret != MPI_SUCCESS) {
       return ret;
@@ -388,13 +388,13 @@ int Net<Dtype>::SendData(const Dtype * buf, size_t bufsize, int target, int tag)
 
 // Receive data
 template <typename Dtype>
-int Net<Dtype>::RecvData(Dtype * buf, size_t bufsize, int source, int tag) {
+int Net<Dtype>::RecvData(Dtype * buf, size_t bufcnt, int source, int tag) {
   MPI_Status stat;
-  size_t rest = bufsize;
-  size_t num_per_time = MPI_BUF_SIZE / sizeof(Dtype);
+  size_t rest = bufcnt;
+  size_t cnt_per_recv = MPI_BUF_SIZE / sizeof(Dtype);
   while (rest > 0) {
-    size_t curs = std::min(rest, num_per_time);
-    int ret = MPI_Recv(buf + bufsize - rest, curs, MPI_FLOAT,
+    size_t curs = std::min(rest, cnt_per_recv);
+    int ret = MPI_Recv(buf + bufcnt - rest, curs, MPI_FLOAT,
         source, tag, MPI_COMM_WORLD, &stat);
     if (ret != MPI_SUCCESS) {
       return ret;
@@ -421,7 +421,7 @@ void Net<Dtype>::SendUpdateValue(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ send update: " << i << "/" << params_.size() << ", "
       << params_[i]->count();
-      int ret = SendData(params_[i]->gpu_diff(), params_[i]->count(), rank, 11);
+      int ret = SendData(params_[i]->cpu_diff(), params_[i]->count(), rank, 11);
     DLOG(INFO) << "++++ sent update: " << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
@@ -448,7 +448,7 @@ void Net<Dtype>::RecvUpdateValue(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ recv update: " << i << "/" << params_.size() << ", "
       << params_[i]->count();
-      int ret = RecvData(params_[i]->mutable_gpu_diff(), params_[i]->count(), rank, 11);
+      int ret = RecvData(params_[i]->mutable_cpu_diff(), params_[i]->count(), rank, 11);
     DLOG(INFO) << "++++ recd update: " << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
@@ -476,12 +476,12 @@ void Net<Dtype>::SendParams(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ send param " << i << "/" << params_.size()
       << " to " << rank << ", "
-      << params_[i]->gpu_data() << ", " << params_[i]->count();
+      << params_[i]->cpu_data() << ", " << params_[i]->count();
 
-      int ret = SendData(params_[i]->gpu_data(), params_[i]->count(), rank, 12);
+      int ret = SendData(params_[i]->cpu_data(), params_[i]->count(), rank, 12);
 
     DLOG(INFO) << "++++ sent param: " << i << "/" << params_.size() << ", "
-      << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
+      << params_[i]->cpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
     }
     break;
   default:
@@ -508,12 +508,12 @@ void Net<Dtype>::RecvParams(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ recv param " << i << "/" << params_.size()
       << " from " << rank << ", "
-      << params_[i]->gpu_data() << ", " << params_[i]->count();
+      << params_[i]->cpu_data() << ", " << params_[i]->count();
 
-      int ret = RecvData(params_[i]->mutable_gpu_data(), params_[i]->count(), rank, 12);
+      int ret = RecvData(params_[i]->mutable_cpu_data(), params_[i]->count(), rank, 12);
 
     DLOG(INFO) << "++++ recd param: " << i << "/" << params_.size() << ", "
-      << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
+      << params_[i]->cpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
     }
     break;
   default:

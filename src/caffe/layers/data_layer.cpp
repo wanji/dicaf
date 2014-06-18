@@ -175,9 +175,7 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
 
   int mpi_rank;
   int mpi_size;
-  const size_t buf_size = 256;
-  static char start_buf[buf_size] = "";
-  const std::string message("OK");
+  size_t bufsize = sizeof(layer->start_buf_);
 
   MPI_Status stat;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
@@ -186,11 +184,13 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
     << mpi_rank << " <- " << mpi_size - 1
     << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
 
-  DLOG(INFO) << "size: " << sizeof(start_buf) << ", per: " << sizeof(start_buf[0]);
-  memset(start_buf, 0, buf_size);
+  DLOG(INFO) << "size: " << bufsize << ", per: " << sizeof(layer->start_buf_[0]);
 
-#if DBG_SEND
-  int ret = MPI_Recv(start_buf, buf_size, MPI_CHAR,
+  // fetch data from HBase
+#if ENABLE_DATA_SERVER
+  memset(layer->start_buf_, 0, bufsize);
+
+  int ret = MPI_Recv(layer->start_buf_, bufsize, MPI_CHAR,
       mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
       MPI_COMM_WORLD, &stat);
 
@@ -199,37 +199,51 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   }
   DLOG(INFO) << "Receive start key from data coordinator: "
     << mpi_rank << " <- " << mpi_size - 1
-    << " (" << start_buf << ")" << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
-#endif
-  if (0 == strcmp(MPI_MSG_END_DATA_PREFETCH, start_buf)) {
+    << " (" << layer->start_buf_ << ")" << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
+  if (0 == strcmp(MPI_MSG_END_DATA_PREFETCH, layer->start_buf_)) {
     DLOG(INFO) << "ENDMSG Received!";
     return static_cast<void*>(NULL);
   }
+#endif
 
-  // fetch data from HBase
-//int scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
-  int scanner = layer->client_->scannerOpen(layer->table_, start_buf,
+  // init the scanner
+  int scanner = layer->client_->scannerOpen(layer->table_, layer->start_buf_,
       layer->columns_, layer->attributes_);
+
+  // fetch one more row, and using the last row key for next start_buf_
   unsigned int num_get = batch_size + 1;
   std::vector<TRowResult> data_batch;
   data_batch.reserve(num_get);
   std::vector<TRowResult> rowResult;
+
 DLOG(INFO) << "out : " << data_batch.size() << "/" << num_get << ", rank: " << mpi_rank;
-  while (data_batch.size() < num_get) {
+
+  while (data_batch.size() < batch_size) {
+
 DLOG(INFO) << data_batch.size() << "/" << num_get << ", rank: " << mpi_rank;
+
     size_t rest = num_get - data_batch.size();
     layer->client_->scannerGetList(rowResult, scanner, rest);
+
+    // We have reached the end. Restart from the first.
     if (rowResult.size() < rest) {
-      // We have reached the end. Restart from the first.
+
 DLOG(INFO) << rowResult.size() << "/" << rest << ", rank: " << mpi_rank;
-      layer->ResetScanner();
-      scanner = layer->client_->scannerOpen(layer->table_, layer->start_,
-      layer->columns_, layer->attributes_);
+
+      layer->client_->scannerClose(scanner);
+      layer->ResetStartBuf();
+      scanner = layer->client_->scannerOpen(layer->table_, layer->start_buf_,
+          layer->columns_, layer->attributes_);
     }
     data_batch.insert(data_batch.end(), rowResult.begin(), rowResult.end());
   }
+
 DLOG(INFO) << "out" << ", rank: " << mpi_rank;
-  // layer->start_ = rowResult[rowResult.size() - 1].row;
+#if ENABLE_DATA_SERVER
+#else
+  strncpy(layer->start_buf_, rowResult.back().row.c_str(), bufsize);
+#endif
+
   layer->client_->scannerClose(scanner);
 
   for (int item_id = 0; item_id < batch_size; ++item_id) {
@@ -488,7 +502,7 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 	this->client_.reset(new HbaseClient(protocol));
 
   this->table_ = this->layer_param_.data_param().source();
-  this->start_ = "";
+  this->start_buf_[0] = 0;
   this->columns_.push_back("cf:data");
 
   std::vector<TRowResult> rowResult;
@@ -497,12 +511,13 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 		transport->open();
 
 		// fetch the first row
-    LOG(INFO) << "** hbase info (host):  " << this->layer_param_.data_param().host()
+    LOG(INFO) << "** hbase info (host):  "
+      << this->layer_param_.data_param().host()
       << ":" << this->layer_param_.data_param().port()
 		  << "/" << this->table_;
 
-    ResetScanner();
-    this->client_->getRow(rowResult, this->table_, this->start_, this->attributes_);
+    this->client_->getRow(rowResult, this->table_,
+        this->start_buf_, this->attributes_);
     if (rowResult.size() < 1) {
       LOG(FATAL) << "Empty database!";
     } else if (rowResult.size() > 1) {
@@ -512,36 +527,41 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 		LOG(FATAL) << "ERROR: " << tx.what();
   }
 
+#if ENABLE_DATA_SERVER
+#else
 	// Check if we would need to randomly skip a few data points
 	if (this->layer_param_.data_param().rand_skip()) {
 	  unsigned int skip = caffe_rng_rand() %
 	                      this->layer_param_.data_param().rand_skip();
 	  LOG(INFO) << "Skipping first " << skip << " data points.";
-		int scanner = this->client_->scannerOpen(this->table_, this->start_,
+		int scanner = this->client_->scannerOpen(this->table_, this->start_buf_,
         this->columns_, this->attributes_);
-    // fetch skip+1 rows, and use the key of the `skip+1`-th row as new start_
+    // fetch skip+1 rows, and use the key of the `skip+1`-th row as new start_buf_
     unsigned int num_get = skip + 1;
     while (num_get > 0) {
       this->client_->scannerGetList(rowResult, scanner, num_get);
       if (rowResult.size() < num_get) {
-        ResetScanner();
-        scanner = this->client_->scannerOpen(this->table_, this->start_,
+        ResetStartBuf();
+        scanner = this->client_->scannerOpen(this->table_, this->start_buf_,
             this->columns_, this->attributes_);
       }
       num_get -= rowResult.size();
     }
-    this->start_ = rowResult[rowResult.size() - 1].row;
+    strncpy(this->start_buf_, rowResult.back().row.c_str(),
+        sizeof(this->start_buf_));
     this->client_->scannerClose(scanner);
 	}
+#endif
   return rowResult[0].columns.begin()->second.value;
 }
 
 template <typename Dtype>
-void HBaseDataLayer<Dtype>::ResetScanner() {
+void HBaseDataLayer<Dtype>::ResetStartBuf() {
   int rank = -1;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   DLOG(INFO) << "Restarting data prefetching from start. (rank " << rank << ")";
-  this->start_ = "";
+
+  this->start_buf_[0] = 0;
 }
 
 

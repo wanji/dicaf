@@ -3,6 +3,7 @@
 #ifndef CAFFE_COMMON_HPP_
 #define CAFFE_COMMON_HPP_
 
+#include <mpi.h>
 #include <boost/shared_ptr.hpp>
 #include <cublas_v2.h>
 #include <cuda.h>
@@ -10,11 +11,35 @@
 #include <driver_types.h>  // cuda driver types
 #include <glog/logging.h>
 
+/****************************************************************
+ * Added by wanji - begin
+ ****************************************************************/
+
 /**
  * constant strings
  */
-const char MPI_MSG_END_DATA_PREFETCH[] = "mpi_end_dat" ;
-#define DBG_SEND 1
+const char MPI_MSG_END_DATA_PREFETCH[] = "mpi_end_dat";
+#define ENABLE_DATA_SERVER 1
+
+const int  NUM_PAR_SRV = 1;
+const int  NUM_DAT_SRV = 1;
+
+/**
+ * MACROs
+ */
+inline std::string mpi_get_err_str(int errorcode) {
+  char errstr[256];
+  int resultlen;
+  int ret = MPI_Error_string(errorcode, errstr, &resultlen);
+  if (ret != MPI_SUCCESS || resultlen > sizeof(errstr)) {
+    LOG(ERROR) << "MPI_Error_string failed: " << errorcode;
+  }
+  return errstr;
+}
+
+/****************************************************************
+ * Added by wanji - end
+ ****************************************************************/
 
 /**
  * constant parameters

@@ -65,10 +65,8 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
 
   LOG(INFO) << "my rank: " << mpi_rank_ << " / " << mpi_size_;
 
-  NUM_PAR_SRV = 1;
-  NUM_DAT_SRV = 1;
-  TRAIN_BEGIN = NUM_PAR_SRV;
-  TRAIN_END = mpi_size_ - NUM_DAT_SRV;
+  train_begin_ = NUM_PAR_SRV;
+  train_end_ = mpi_size_ - NUM_DAT_SRV;
 
   // Scaffolding code
   if (mpi_rank_ < NUM_PAR_SRV) {
@@ -84,7 +82,7 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
     }
     LOG(INFO) << "** Parameter server initialization done!";
 
-  } else if (mpi_rank_ >= TRAIN_END) {
+  } else if (mpi_rank_ >= train_end_) {
 
     LOG(INFO) << "** Data server initialization done!";
 
@@ -102,7 +100,7 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
 
 template <typename Dtype>
 void Solver<Dtype>::Solve(const char* resume_file) {
-// if (mpi_rank_ < TRAIN_END) {
+// if (mpi_rank_ < train_end_) {
   Caffe::set_mode(Caffe::Brew(param_.solver_mode()));
   if (param_.solver_mode() == SolverParameter_SolverMode_GPU &&
       param_.has_device_id()) {
@@ -120,9 +118,11 @@ void Solver<Dtype>::Solve(const char* resume_file) {
       Restore(resume_file);
     }
     RunParServer();
-  } else if (mpi_rank_ >= TRAIN_END) {
+  } else if (mpi_rank_ >= train_end_) {
+#if ENABLE_DATA_SERVER
     LOG(INFO) << "RunDatServer ...";
     RunDatServer();
+#endif
   } else {
     LOG(INFO) << "RunTrainer ...";
     PreSolve();
@@ -147,7 +147,7 @@ void Solver<Dtype>::RunParServer() {
 
   while (iter_++ < param_.max_iter()) {
 DLOG(INFO) << "RunParServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
+    for (int i=train_begin_; i<train_end_; i++) {
 DLOG(INFO) << "RunParServer_iter-Sending(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       // send current parameters to job-i
       net_->SendParams(i);
@@ -155,7 +155,7 @@ DLOG(INFO) << "RunParServer_iter-Sent   (" << i << "): " << iter_ << "/" << para
     }
     //MPI_Barrier(MPI_COMM_WORLD);
 
-    for (int i=TRAIN_BEGIN; i<TRAIN_END; i++) {
+    for (int i=train_begin_; i<train_end_; i++) {
 DLOG(INFO) << "RunParServer_iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       // receive update values from job-i
       net_->RecvUpdateValue(i);
@@ -275,7 +275,7 @@ void Solver<Dtype>::RunDatServer() {
   if (test_batch_size < 0) {
     LOG(FATAL) << "ERROR: " << "wrong test batch size!";
   }
-  train_fetch = (TRAIN_END - TRAIN_BEGIN) * train_batch_size;
+  train_fetch = (train_end_ - train_begin_) * train_batch_size;
 
   LOG(INFO) << "Test batch size: " << test_batch_size;
   LOG(INFO) << "Training batch size: " << train_batch_size;
@@ -290,7 +290,6 @@ void Solver<Dtype>::RunDatServer() {
   std::vector<std::string> train_keys;
   std::vector<std::string> test_keys;
 
-#if DBG_SEND
   // initialize the scanners
   int train_scanner = client->scannerOpen("cifar-train", "", columns, attributes);
   int test_scanner = client->scannerOpen("cifar-test", "", columns, attributes);
@@ -366,7 +365,7 @@ DLOG(INFO) << "RunDatServer_iter: " << iter_ << "/" << param_.max_iter() << " (r
 
 DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // dispatch training data
-    for (int i = TRAIN_BEGIN; i < TRAIN_END; ++i) {
+    for (int i = train_begin_; i < train_end_; ++i) {
       train_kid %= train_keys.size();
       DLOG(INFO) << "Sending start key to trainer: "
         << mpi_rank_ << " -> " << i
@@ -387,7 +386,7 @@ DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " 
 DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // dispatch test data
     if (iter_ == 1 || param_.test_interval() && iter_ % param_.test_interval() == 0) {
-      for (int i = 0; i < TRAIN_BEGIN; ++i) {
+      for (int i = 0; i < train_begin_; ++i) {
         for (int j = 0; j < test_iter; ++j) {
           test_kid %= test_keys.size();
           DLOG(INFO) << "Sending start key to tester: "
@@ -412,7 +411,7 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
 
   DLOG(INFO) << "Post processing 1/2 ...";
 
-  for (int i = 0; i < TRAIN_END; ++i) {
+  for (int i = 0; i < train_end_; ++i) {
     int ret = MPI_Ssend(MPI_MSG_END_DATA_PREFETCH,
         sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 1, MPI_COMM_WORLD);
 
@@ -423,8 +422,8 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
 
   DLOG(INFO) << "Post processing 2/2 ...";
 
-  for (int i = 0; i < TRAIN_BEGIN; ++i) {
-    int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
+  for (int i = 0; i < train_begin_; ++i) {
+    int ret = MPI_Ssend(MPI_MSG_END_DATA_PREFETCH,
         sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 2, MPI_COMM_WORLD);
 
     if (MPI_SUCCESS != ret) {
@@ -433,7 +432,6 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
   } // end for
 
   DLOG(INFO) << "Post processing done!";
-#endif
 }
 
 template <typename Dtype>

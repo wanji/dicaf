@@ -21,7 +21,14 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  MPI_Init(&argc, &argv);
+  int provided;
+  int ret = MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+  if (ret != MPI_SUCCESS) {
+    LOG(FATAL) << "** MPI_Init Failed: " << mpi_get_err_str(ret);
+  }
+  if (provided != MPI_THREAD_MULTIPLE) {
+    LOG(FATAL) << "** MPI_THREAD_MULTIPLE not meet: " << provided;
+  }
 
   SolverParameter solver_param;
   ReadProtoFromTextFileOrDie(argv[1], &solver_param);
