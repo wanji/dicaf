@@ -109,24 +109,46 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   Caffe::set_phase(Caffe::TRAIN);
 // }
 
-  iter_ = 0;
   if (mpi_rank_ < NUM_PAR_SRV) {
     LOG(INFO) << "Solving " << net_->name();
 
+    iter_ = 0;
     if (resume_file) {
       LOG(INFO) << "Restoring previous solver status from " << resume_file;
       Restore(resume_file);
     }
+
+    if (0 == mpi_rank_) {
+      for (int i=train_begin_; i<mpi_size_; i++) {
+        int ret = MPI_Ssend(&iter_, 1, MPI_INT, i, 100, MPI_COMM_WORLD);
+        if (ret != MPI_SUCCESS) {
+          LOG(FATAL) << "Sending iter_ to trainers " << i << " Failed!";
+        }
+      }
+    }
+
     RunParServer();
-  } else if (mpi_rank_ >= train_end_) {
-#if ENABLE_DATA_SERVER
-    LOG(INFO) << "RunDatServer ...";
-    RunDatServer();
-#endif
-  } else {
+  } else if (mpi_rank_ < train_end_) {
+    MPI_Status stat;
+    int ret = MPI_Recv(&iter_, 1, MPI_INT, 0, 100, MPI_COMM_WORLD, &stat);
+    if (ret != MPI_SUCCESS) {
+      LOG(FATAL) << "Receiving iter_ from header Failed! rank=" << mpi_rank_;
+    }
+
     LOG(INFO) << "RunTrainer ...";
     PreSolve();
     RunTrainer();
+  } else {
+#if ENABLE_DATA_SERVER
+    MPI_Status stat;
+    int ret = MPI_Recv(&iter_, 1, MPI_INT, 0, 100, MPI_COMM_WORLD, &stat);
+    if (ret != MPI_SUCCESS) {
+      LOG(FATAL) << "Receiving iter_ from header Failed! rank=" << mpi_rank_;
+    }
+
+    LOG(INFO) << "RunDatServer ...";
+    RunDatServer();
+#endif
   }
   LOG(INFO) << "Optimization Done. (rank: " << mpi_rank_ << ")";
 }
@@ -146,38 +168,36 @@ void Solver<Dtype>::RunParServer() {
   }
 
   while (iter_++ < param_.max_iter()) {
-DLOG(INFO) << "RunParServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     for (int i=train_begin_; i<train_end_; i++) {
-DLOG(INFO) << "RunParServer_iter-Sending(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+      DLOG(INFO) << "Parameters Sending: [" << mpi_rank_ << "] -> [" << i << "] " 
+        << "(iter: " << iter_ << "/" << param_.max_iter() << ")";
       // send current parameters to job-i
       net_->SendParams(i);
-DLOG(INFO) << "RunParServer_iter-Sent   (" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+      DLOG(INFO) << "Parameters Sent:    [" << mpi_rank_ << "] -> [" << i << "] " 
+        << "(iter: " << iter_ << "/" << param_.max_iter() << ")";
     }
     //MPI_Barrier(MPI_COMM_WORLD);
 
     for (int i=train_begin_; i<train_end_; i++) {
-DLOG(INFO) << "RunParServer_iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+      DLOG(INFO) << "Updates Receiving: [" << mpi_rank_ << "] <- [" << i << "] " 
+        << "(iter: " << iter_ << "/" << param_.max_iter() << ")";
       // receive update values from job-i
       net_->RecvUpdateValue(i);
+      DLOG(INFO) << "Updates Received:  [" << mpi_rank_ << "] <- [" << i << "] " 
+        << "(iter: " << iter_ << "/" << param_.max_iter() << ")";
 
-DLOG(INFO) << "RunParServer_iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       if (param_.display() && iter_ % param_.display() == 0) {
         LOG(INFO) << "Got updates of Iter-" << iter_ << " from node " << i;
       }
-DLOG(INFO) << "RunParServer_iter-1(" << i << "): " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
 
       // update the values
       net_->Update();
     }
-DLOG(INFO) << "RunParServer_iter-1-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
-DLOG(INFO) << "RunParServer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       Test();
     }
-DLOG(INFO) << "RunParServer_iter-2-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // Check if we need to do snapshot
     if (param_.snapshot() && iter_ % param_.snapshot() == 0) {
-DLOG(INFO) << "RunParServer_iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       Snapshot();
     }
   }
@@ -196,25 +216,26 @@ void Solver<Dtype>::RunTrainer() {
   vector<Blob<Dtype>*> bottom_vec;
 
   while (iter_++ < param_.max_iter()) {
-    DLOG(INFO) << "RunTrainer_iter-Receiving: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    DLOG(INFO) << "Parameters Receiving: [" << mpi_rank_ << "] <- [0] " 
+      << "(iter: " << iter_ << "/" << param_.max_iter() << ")";
     // receive the latest parameters from parameter server
     net_->RecvParams(0);
-    DLOG(INFO) << "RunTrainer_iter-Received:  " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
-    //MPI_Barrier(MPI_COMM_WORLD);
+    DLOG(INFO) << "Parameters Received:  [" << mpi_rank_ << "] <- [0] " 
+      << "(iter: " << iter_ << "/" << param_.max_iter() << ")";
 
     Dtype loss = net_->ForwardBackward(bottom_vec);
-    DLOG(INFO) << "RunTrainer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     ComputeUpdateValue();
-    DLOG(INFO) << "RunTrainer_iter-2: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+
+    DLOG(INFO) << "Updates Sending: [" << mpi_rank_ << "] -> [0] " 
+      << "(iter: " << iter_ << "/" << param_.max_iter() << ")";
     net_->SendUpdateValue(0);
-    DLOG(INFO) << "RunTrainer_iter-3: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
+    DLOG(INFO) << "Updates Sent:    [" << mpi_rank_ << "] -> [0] " 
+      << "(iter: " << iter_ << "/" << param_.max_iter() << ")";
 
     if (param_.display() && iter_ % param_.display() == 0) {
-    DLOG(INFO) << "RunTrainer_iter-4: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
       LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss
         << " (rank: " << mpi_rank_ << ")";
     }
-    DLOG(INFO) << "RunTrainer_iter-5: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
   }
 }
 
@@ -254,6 +275,7 @@ void Solver<Dtype>::RunDatServer() {
   size_t train_batch_size = -1;
   size_t test_batch_size = -1;
   size_t train_fetch = -1;
+  size_t test_fetch = -1;
   size_t test_iter = param_.test_iter();
   for (size_t lid=0; lid<train_param.layers_size(); ++lid) {
     const LayerParameter_LayerType& type = train_param.layers(lid).type();
@@ -276,11 +298,13 @@ void Solver<Dtype>::RunDatServer() {
     LOG(FATAL) << "ERROR: " << "wrong test batch size!";
   }
   train_fetch = (train_end_ - train_begin_) * train_batch_size;
+  test_fetch = test_iter * train_batch_size;
 
-  LOG(INFO) << "Test batch size: " << test_batch_size;
-  LOG(INFO) << "Training batch size: " << train_batch_size;
-  LOG(INFO) << "Fetch " << train_fetch << " row keys for training per iteration.";
-  LOG(INFO) << "Test-iter: " << test_iter;
+  LOG(INFO) << "- Test batch size: " << test_batch_size;
+  LOG(INFO) << "- Training batch size: " << train_batch_size;
+  LOG(INFO) << "- Fetch " << train_fetch << " row keys for training per iter.";
+  LOG(INFO) << "- Fetch " << test_fetch << " row keys for test each time.";
+  LOG(INFO) << "- Number of iterations per test: " << test_iter;
 
   // fetch row keys from HBase
   bool train_fetch_rows = true;
@@ -327,6 +351,8 @@ void Solver<Dtype>::RunDatServer() {
 #endif
 
   DLOG(INFO) << "iter/max_iter: " << iter_ << "/" << param_.max_iter();
+
+  bool first_iter = true;
   while (iter_++ < param_.max_iter()) {
 DLOG(INFO) << "RunDatServer_iter: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
 #if !PREFETCH_ROW_KEYS
@@ -389,13 +415,21 @@ DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " 
 
 DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " (rank: " << mpi_rank_ << ")";
     // dispatch test data
-    if (iter_ == 1 || param_.test_interval() && iter_ % param_.test_interval() == 0) {
+    if (first_iter ||
+        param_.test_interval() && iter_ % param_.test_interval() == 0) {
+      first_iter = false;
+      DLOG(INFO) << "Sending start key to tester ...";
+      DLOG(INFO) << "\t" << first_iter;
+      DLOG(INFO) << "\t" << iter_;
+      DLOG(INFO) << "\t" << param_.test_interval();
       for (int i = 0; i < train_begin_; ++i) {
         for (int j = 0; j < test_iter; ++j) {
           test_kid %= test_keys.size();
-          DLOG(INFO) << "Sending start key to tester: "
-            << mpi_rank_ << " -> " << i << "(" << j << "-th)"
-            << " " << test_kid << ": " << test_keys.size();
+
+          DLOG(INFO) << "To tester: [" << mpi_rank_ << "] -> [" << i << "] "
+            << "key: " << test_keys[test_kid]
+            << "(" << test_kid << "/" << test_keys.size() << ") "
+            << "(iter: " << iter_ << "+" << j << ")";
 
           int ret = MPI_Ssend(test_keys[test_kid].data(),
               test_keys[test_kid].size(), MPI_CHAR, i, 2, MPI_COMM_WORLD);
@@ -404,8 +438,8 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
             LOG(FATAL) << "MPI_Recv failed";
           }
 
-          DLOG(INFO) << "Sent: " << ret << "(" << mpi_rank_ << " -> " << i << ") "
-            << "(" << j << "-th)" << test_keys[test_kid];
+          DLOG(INFO) << "Sent: [" << mpi_rank_ << "] -> [" << i << "]";
+
           test_kid += test_batch_size;
         }
       }

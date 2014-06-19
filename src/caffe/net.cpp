@@ -437,19 +437,21 @@ void Net<Dtype>::RecvUpdateValue(int rank) {
   switch (Caffe::mode()) {
   case Caffe::CPU:
     for (int i = 0; i < params_.size(); ++i) {
-    DLOG(INFO) << "++++ recv update: " << i << "/" << params_.size() << ", "
-      << params_[i]->count();
+    DLOG(INFO) << "++++ recv update from " << rank << ": "
+      << i << "/" << params_.size() << ", " << params_[i]->count();
       int ret = RecvData(params_[i]->mutable_cpu_diff(), params_[i]->count(), rank, 11);
-    DLOG(INFO) << "++++ recd update: " << i << "/" << params_.size() << ", "
+    DLOG(INFO) << "++++ recd update from " << rank << ": "
+      << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
     break;
   case Caffe::GPU:
     for (int i = 0; i < params_.size(); ++i) {
-    DLOG(INFO) << "++++ recv update: " << i << "/" << params_.size() << ", "
-      << params_[i]->count();
+    DLOG(INFO) << "++++ recv update from " << rank << ": "
+      << i << "/" << params_.size() << ", " << params_[i]->count();
       int ret = RecvData(params_[i]->mutable_gpu_diff(), params_[i]->count(), rank, 11);
-    DLOG(INFO) << "++++ recd update: " << i << "/" << params_.size() << ", "
+    DLOG(INFO) << "++++ recd update from " << rank << ": "
+      << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
     break;
