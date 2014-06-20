@@ -41,13 +41,13 @@ namespace caffe {
 
 template <typename Dtype>
 Solver<Dtype>::Solver(const SolverParameter& param)
-    : net_(), test_net_() {
+    : net_() {
   Init(param);
 }
 
 template <typename Dtype>
 Solver<Dtype>::Solver(const string& param_file)
-    : net_(), test_net_() {
+    : net_() {
   SolverParameter param;
   ReadProtoFromTextFile(param_file, &param);
   Init(param);
@@ -63,7 +63,7 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size_);
 
-  LOG(INFO) << "my rank: " << mpi_rank_ << " / " << mpi_size_;
+  LOG(INFO) << "My Rank: " << mpi_rank_ << " / " << mpi_size_;
 
   train_begin_ = NUM_PAR_SRV;
   train_end_ = mpi_size_ - NUM_DAT_SRV;
@@ -71,14 +71,14 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   // Scaffolding code
   if (mpi_rank_ < NUM_PAR_SRV) {
 
-    LOG(INFO) << "Creating training net ...";
-    net_.reset(new Net<Dtype>(param_.train_net()));
-
+    LOG(INFO) << "Creating testing net ...";
     if (param_.has_test_net()) {
-      LOG(INFO) << "Creating testing net ...";
-      test_net_.reset(new Net<Dtype>(param_.test_net()));
+      net_.reset(new Net<Dtype>(param_.test_net()));
       CHECK_GT(param_.test_iter(), 0);
       CHECK_GT(param_.test_interval(), 0);
+    } else {
+      net_.reset(new Net<Dtype>(param_.train_net()));
+      LOG(ERROR) << "** Cannot find test net, using training net to host the parameters";
     }
     LOG(INFO) << "** Parameter server initialization done!";
 
@@ -106,7 +106,6 @@ void Solver<Dtype>::Solve(const char* resume_file) {
       param_.has_device_id()) {
     Caffe::SetDevice(param_.device_id());
   }
-  Caffe::set_phase(Caffe::TRAIN);
 // }
 
   if (mpi_rank_ < NUM_PAR_SRV) {
@@ -120,7 +119,7 @@ void Solver<Dtype>::Solve(const char* resume_file) {
 
     if (0 == mpi_rank_) {
       for (int i=train_begin_; i<mpi_size_; i++) {
-        int ret = MPI_Ssend(&iter_, 1, MPI_INT, i, 100, MPI_COMM_WORLD);
+        int ret = MPI_Send(&iter_, 1, MPI_INT, i, 100, MPI_COMM_WORLD);
         if (ret != MPI_SUCCESS) {
           LOG(FATAL) << "Sending iter_ to trainers " << i << " Failed!";
         }
@@ -163,6 +162,7 @@ void Solver<Dtype>::RunParServer() {
   // very long time (param_.test_interval() training iterations) to report that
   // there's not enough memory to run the test net and crash, etc.; and to gauge
   // the effect of the first training iterations.
+  Caffe::set_phase(Caffe::TEST);
   if (param_.test_interval()) {
     Test();
   }
@@ -211,6 +211,8 @@ void Solver<Dtype>::RunParServer() {
 ////////////////////////////////////////////////////////////////
 template <typename Dtype>
 void Solver<Dtype>::RunTrainer() {
+  Caffe::set_phase(Caffe::TRAIN);
+
   // For a network that is trained by the solver, no bottom or top vecs
   // should be given, and we will just provide dummy vecs.
   vector<Blob<Dtype>*> bottom_vec;
@@ -401,7 +403,7 @@ DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " 
         << mpi_rank_ << " -> " << i
         << " " << train_kid << ": " << train_keys.size();
 
-      int ret = MPI_Ssend(train_keys[train_kid].data(),
+      int ret = MPI_Send(train_keys[train_kid].data(),
           train_keys[train_kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
 
       if (MPI_SUCCESS != ret) {
@@ -431,7 +433,7 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
             << "(" << test_kid << "/" << test_keys.size() << ") "
             << "(iter: " << iter_ << "+" << j << ")";
 
-          int ret = MPI_Ssend(test_keys[test_kid].data(),
+          int ret = MPI_Send(test_keys[test_kid].data(),
               test_keys[test_kid].size(), MPI_CHAR, i, 2, MPI_COMM_WORLD);
 
           if (MPI_SUCCESS != ret) {
@@ -450,7 +452,7 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
   DLOG(INFO) << "Post processing 1/2 ...";
 
   for (int i = 0; i < train_end_; ++i) {
-    int ret = MPI_Ssend(MPI_MSG_END_DATA_PREFETCH,
+    int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
         sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 1, MPI_COMM_WORLD);
 
     if (MPI_SUCCESS != ret) {
@@ -461,7 +463,7 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
   DLOG(INFO) << "Post processing 2/2 ...";
 
   for (int i = 0; i < train_begin_; ++i) {
-    int ret = MPI_Ssend(MPI_MSG_END_DATA_PREFETCH,
+    int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
         sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 2, MPI_COMM_WORLD);
 
     if (MPI_SUCCESS != ret) {
@@ -470,21 +472,29 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
   } // end for
 
   DLOG(INFO) << "Post processing done!";
+
+  try {
+    transport->close();
+  } catch (const TException &tx) {
+    LOG(FATAL) << "ERROR: " << tx.what();
+  }
+  LOG(INFO) << "HBase connection closed!";
 }
 
 template <typename Dtype>
 void Solver<Dtype>::Test() {
   LOG(INFO) << "Iteration " << iter_ << ", Testing net";
   // We need to set phase to test before running.
-  Caffe::set_phase(Caffe::TEST);
-  CHECK_NOTNULL(test_net_.get())->ShareTrainedLayersWith(net_.get());
+  // no need any more - wj (2014-06-20)
+  // Caffe::set_phase(Caffe::TEST);
+  // CHECK_NOTNULL(test_net_.get())->ShareTrainedLayersWith(net_.get());
   vector<Dtype> test_score;
   vector<Blob<Dtype>*> bottom_vec;
   Dtype loss = 0;
   for (int i = 0; i < param_.test_iter(); ++i) {
     Dtype iter_loss;
     const vector<Blob<Dtype>*>& result =
-        test_net_->Forward(bottom_vec, &iter_loss);
+        net_->Forward(bottom_vec, &iter_loss);
     if (param_.test_compute_loss()) {
       loss += iter_loss;
     }
@@ -513,7 +523,7 @@ void Solver<Dtype>::Test() {
     LOG(INFO) << "Test score #" << i << ": "
         << test_score[i] / param_.test_iter();
   }
-  Caffe::set_phase(Caffe::TRAIN);
+  // Caffe::set_phase(Caffe::TRAIN);
 }
 
 

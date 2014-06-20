@@ -51,7 +51,6 @@ class Solver {
   SolverParameter param_;
   int iter_;
   shared_ptr<Net<Dtype> > net_;
-  shared_ptr<Net<Dtype> > test_net_;
   // MPI attributes
   int mpi_rank_;
   int mpi_size_;
