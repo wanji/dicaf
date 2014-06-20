@@ -18,16 +18,24 @@
 #include "caffe/proto/caffe.pb.h"
 
 namespace apache {
-	namespace hadoop {
-		namespace hbase {
-			namespace thrift {
-				class HbaseClient;
-			}
-		}
-	}
+  namespace hadoop {
+    namespace hbase {
+      namespace thrift {
+        class HbaseClient;
+      }
+    }
+  }
+
+  namespace thrift {
+    namespace transport {
+      class TTransport;
+    }
+  }
 }
 
+
 using apache::hadoop::hbase::thrift::HbaseClient;
+using apache::thrift::transport::TTransport;
 
 namespace caffe {
 
@@ -151,6 +159,7 @@ class HBaseDataLayer : public DataLayer<Dtype> {
  public:
   explicit HBaseDataLayer(const LayerParameter& param)
       : DataLayer<Dtype>(param) {}
+  virtual ~HBaseDataLayer();
   // Setup the database and return the first data point to initialize the top blob
   virtual std::string SetUpDB();
 
@@ -159,6 +168,7 @@ class HBaseDataLayer : public DataLayer<Dtype> {
   virtual void ResetStartBuf();
 
   shared_ptr<HbaseClient> client_;
+  shared_ptr<TTransport> transport_;
 
   std::string table_;
   char start_buf_[256];

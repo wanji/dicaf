@@ -27,7 +27,6 @@ using std::string;
 using namespace apache::thrift;
 using namespace apache::thrift::protocol;
 using namespace apache::thrift::transport;
-
 using namespace apache::hadoop::hbase::thrift;
 
 typedef std::vector<std::string> StrVec;
@@ -187,24 +186,24 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   DLOG(INFO) << "size: " << bufsize << ", per: " << sizeof(layer->start_buf_[0]);
 
   // fetch data from HBase
-#if ENABLE_DATA_SERVER
-  memset(layer->start_buf_, 0, bufsize);
+  if (Caffe::phase() != Caffe::TEST) {
+    memset(layer->start_buf_, 0, bufsize);
 
-  int ret = MPI_Recv(layer->start_buf_, bufsize, MPI_CHAR,
-      mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
-      MPI_COMM_WORLD, &stat);
+    int ret = MPI_Recv(layer->start_buf_, bufsize, MPI_CHAR,
+        mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
+        MPI_COMM_WORLD, &stat);
 
-  if (MPI_SUCCESS != ret) {
-    LOG(FATAL) << "MPI_Recv failed";
+    if (MPI_SUCCESS != ret) {
+      LOG(FATAL) << "MPI_Recv failed";
+    }
+    DLOG(INFO) << "Receive start key from data coordinator: "
+      << mpi_rank << " <- " << mpi_size - 1
+      << " (" << layer->start_buf_ << ")" << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
+    if (0 == strcmp(MPI_MSG_END_DATA_PREFETCH, layer->start_buf_)) {
+      DLOG(INFO) << "ENDMSG Received!";
+      return static_cast<void*>(NULL);
+    }
   }
-  DLOG(INFO) << "Receive start key from data coordinator: "
-    << mpi_rank << " <- " << mpi_size - 1
-    << " (" << layer->start_buf_ << ")" << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
-  if (0 == strcmp(MPI_MSG_END_DATA_PREFETCH, layer->start_buf_)) {
-    DLOG(INFO) << "ENDMSG Received!";
-    return static_cast<void*>(NULL);
-  }
-#endif
 
   // init the scanner
   int scanner = layer->client_->scannerOpen(layer->table_, layer->start_buf_,
@@ -239,10 +238,10 @@ DLOG(INFO) << rowResult.size() << "/" << rest << ", rank: " << mpi_rank;
   }
 
 DLOG(INFO) << "out" << ", rank: " << mpi_rank;
-#if ENABLE_DATA_SERVER
-#else
-  strncpy(layer->start_buf_, rowResult.back().row.c_str(), bufsize);
-#endif
+
+  if (Caffe::phase() == Caffe::TEST) {
+    strncpy(layer->start_buf_, rowResult.back().row.c_str(), bufsize);
+  }
 
   layer->client_->scannerClose(scanner);
 
@@ -492,13 +491,22 @@ DLOG(INFO) << "Forward_cpu. (rank " << rank << ")";
 INSTANTIATE_CLASS(DataLayer);
 
 template <typename Dtype>
+HBaseDataLayer<Dtype>::~HBaseDataLayer() {
+  try {
+    this->transport_->close();
+  } catch (const TException &tx) {
+    LOG(FATAL) << "ERROR: " << tx.what();
+  }
+}
+
+template <typename Dtype>
 std::string HBaseDataLayer<Dtype>::SetUpDB() {
 	// Initialize the HBase client
-	boost::shared_ptr<TTransport> socket(new TSocket(
+	shared_ptr<TTransport> socket(new TSocket(
         this->layer_param_.data_param().host(),
         this->layer_param_.data_param().port()));
-	boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
-	boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
+	this->transport_.reset(new TBufferedTransport(socket));
+	shared_ptr<TProtocol> protocol(new TBinaryProtocol(this->transport_));
 	this->client_.reset(new HbaseClient(protocol));
 
   this->table_ = this->layer_param_.data_param().source();
@@ -508,7 +516,7 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
   std::vector<TRowResult> rowResult;
 
 	try {
-		transport->open();
+		this->transport_->open();
 
 		// fetch the first row
     LOG(INFO) << "** hbase info (host):  "
@@ -527,10 +535,10 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 		LOG(FATAL) << "ERROR: " << tx.what();
   }
 
-#if ENABLE_DATA_SERVER
-#else
 	// Check if we would need to randomly skip a few data points
-	if (this->layer_param_.data_param().rand_skip()) {
+  // start keys of training net will be controlled by data server
+	if (Caffe::phase() == Caffe::TEST &&
+      this->layer_param_.data_param().rand_skip()) {
 	  unsigned int skip = caffe_rng_rand() %
 	                      this->layer_param_.data_param().rand_skip();
 	  LOG(INFO) << "Skipping first " << skip << " data points.";
@@ -551,7 +559,7 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
         sizeof(this->start_buf_));
     this->client_->scannerClose(scanner);
 	}
-#endif
+
   return rowResult[0].columns.begin()->second.value;
 }
 
