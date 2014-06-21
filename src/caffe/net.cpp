@@ -421,7 +421,11 @@ void Net<Dtype>::SendUpdateValue(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ send update: " << i << "/" << params_.size() << ", "
       << params_[i]->count();
+#if CUDA_AWARE_MPI
       int ret = SendData(params_[i]->gpu_diff(), params_[i]->count(), rank, 11);
+#else
+      int ret = SendData(params_[i]->cpu_diff(), params_[i]->count(), rank, 11);
+#endif
     DLOG(INFO) << "++++ sent update: " << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
@@ -449,7 +453,11 @@ void Net<Dtype>::RecvUpdateValue(int rank) {
     for (int i = 0; i < params_.size(); ++i) {
     DLOG(INFO) << "++++ recv update from " << rank << ": "
       << i << "/" << params_.size() << ", " << params_[i]->count();
+#if CUDA_AWARE_MPI
       int ret = RecvData(params_[i]->mutable_gpu_diff(), params_[i]->count(), rank, 11);
+#else
+      int ret = RecvData(params_[i]->mutable_cpu_diff(), params_[i]->count(), rank, 11);
+#endif
     DLOG(INFO) << "++++ recd update from " << rank << ": "
       << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
@@ -480,7 +488,11 @@ void Net<Dtype>::SendParams(int rank) {
       << " to " << rank << ", "
       << params_[i]->gpu_data() << ", " << params_[i]->count();
 
+#if CUDA_AWARE_MPI
       int ret = SendData(params_[i]->gpu_data(), params_[i]->count(), rank, 12);
+#else
+      int ret = SendData(params_[i]->cpu_data(), params_[i]->count(), rank, 12);
+#endif
 
     DLOG(INFO) << "++++ sent param: " << i << "/" << params_.size() << ", "
       << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
@@ -512,7 +524,11 @@ void Net<Dtype>::RecvParams(int rank) {
       << " from " << rank << ", "
       << params_[i]->gpu_data() << ", " << params_[i]->count();
 
+#if CUDA_AWARE_MPI
       int ret = RecvData(params_[i]->mutable_gpu_data(), params_[i]->count(), rank, 12);
+#else
+      int ret = RecvData(params_[i]->mutable_cpu_data(), params_[i]->count(), rank, 12);
+#endif
 
     DLOG(INFO) << "++++ recd param: " << i << "/" << params_.size() << ", "
       << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
