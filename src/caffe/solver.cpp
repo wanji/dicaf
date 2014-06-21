@@ -245,8 +245,36 @@ void Solver<Dtype>::RunTrainer() {
 template <typename Dtype>
 void Solver<Dtype>::RunDatServer() {
 
+  // parse network parameters
+  NetParameter train_param;
+  ReadNetParamsFromTextFileOrDie(param_.train_net(), &train_param);
+
+  // get training batch size
+  size_t train_batch_size = -1;
+  size_t train_fetch = -1;
+  std::string table;
+  std::string host;
+  int port;
+  for (size_t lid=0; lid<train_param.layers_size(); ++lid) {
+    const LayerParameter_LayerType& type = train_param.layers(lid).type();
+    if (type == LayerParameter_LayerType_HBASE_DATA) {
+      train_batch_size = train_param.layers(lid).data_param().batch_size();
+      host  = train_param.layers(lid).data_param().host();
+      port  = train_param.layers(lid).data_param().port();
+      table = train_param.layers(lid).data_param().source();
+      break;
+    }
+  }
+  if (train_batch_size < 0) {
+    LOG(FATAL) << "ERROR: " << "wrong train batch size!";
+  }
+  train_fetch = (train_end_ - train_begin_) * train_batch_size;
+
+  LOG(INFO) << "- Training batch size: " << train_batch_size;
+  LOG(INFO) << "- Fetch " << train_fetch << " row keys for training per iter.";
+
   LOG(INFO) << "Connecting to HBase ...";
-  boost::shared_ptr<TTransport> socket(new TSocket("localhost", 9090));
+  boost::shared_ptr<TTransport> socket(new TSocket(host, port));
   boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
   boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
   shared_ptr<HbaseClient> client(new HbaseClient(protocol));
@@ -265,35 +293,13 @@ void Solver<Dtype>::RunDatServer() {
   // store the scanned results
   std::vector<TRowResult> rowResult;
 
-  // parse network parameters
-  NetParameter train_param;
-  ReadNetParamsFromTextFileOrDie(param_.train_net(), &train_param);
-
-  // get training batch size
-  size_t train_batch_size = -1;
-  size_t train_fetch = -1;
-  for (size_t lid=0; lid<train_param.layers_size(); ++lid) {
-    const LayerParameter_LayerType& type = train_param.layers(lid).type();
-    if (type == LayerParameter_LayerType_HBASE_DATA) {
-      train_batch_size = train_param.layers(lid).data_param().batch_size();
-      break;
-    }
-  }
-  if (train_batch_size < 0) {
-    LOG(FATAL) << "ERROR: " << "wrong train batch size!";
-  }
-  train_fetch = (train_end_ - train_begin_) * train_batch_size;
-
-  LOG(INFO) << "- Training batch size: " << train_batch_size;
-  LOG(INFO) << "- Fetch " << train_fetch << " row keys for training per iter.";
-
   // fetch row keys from HBase
   bool train_fetch_rows = true;
   int train_kid = 0;
   std::vector<std::string> train_keys;
 
   // initialize the scanners
-  int train_scanner = client->scannerOpen("cifar-train", "", columns, attributes);
+  int train_scanner = client->scannerOpen(table, "", columns, attributes);
 
 #if PREFETCH_ROW_KEYS
   size_t fetch_num = 1024;
