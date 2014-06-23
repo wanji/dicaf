@@ -19,9 +19,9 @@ lr_policy: "fixed"
 # Display every 100 iterations
 display: 100
 # The maximum number of iterations
-max_iter: 1250
+max_iter: SECOND_ITER
 # snapshot intermediate results
-snapshot: 1250
+snapshot: SECOND_ITER
 snapshot_prefix: "cifar10_quick"
 # solver mode: CPU or GPU
 solver_mode: GPU
