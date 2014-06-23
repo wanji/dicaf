@@ -60,6 +60,7 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
     Caffe::set_random_seed(param_.random_seed());
   }
 
+  device_count_ = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size_);
 
@@ -102,13 +103,35 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
 
 template <typename Dtype>
 void Solver<Dtype>::Solve(const char* resume_file) {
-// if (mpi_rank_ < train_end_) {
-  Caffe::set_mode(Caffe::Brew(param_.solver_mode()));
-  if (param_.solver_mode() == SolverParameter_SolverMode_GPU &&
-      param_.has_device_id()) {
-    Caffe::SetDevice(param_.device_id());
+  if (mpi_rank_ < train_end_) {
+    Caffe::set_mode(Caffe::Brew(param_.solver_mode()));
+    // if (param_.solver_mode() == SolverParameter_SolverMode_GPU &&
+    //     param_.has_device_id()) {
+    //   Caffe::SetDevice(param_.device_id());
+    // }
+    if (param_.solver_mode() == SolverParameter_SolverMode_GPU) {
+      cudaError_t error_id = cudaGetDeviceCount(&device_count_);
+
+      if (error_id != cudaSuccess) {
+          LOG(FATAL) << "cudaGetDeviceCount returned " << error_id << ":"
+            << cudaGetErrorString(error_id);
+      }
+      
+      if (device_count_ == 0) {
+          LOG(FATAL) << "There are no available device(s) that support CUDA";
+      }
+
+
+      if (mpi_rank_ < train_begin_) {
+        LOG(INFO) << "rank " << mpi_rank_ << " adopt device " << 0;
+        Caffe::SetDevice(0);
+      } else {
+        int device_id = (mpi_rank_ - train_begin_) % device_count_;
+        LOG(INFO) << "rank " << mpi_rank_ << " adopt device " << device_id;
+        Caffe::SetDevice(device_id);
+      }
+    }
   }
-// }
 
   if (mpi_rank_ < NUM_PAR_SRV) {
     LOG(INFO) << "Solving " << net_->name();

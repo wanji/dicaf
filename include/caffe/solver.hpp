@@ -54,6 +54,7 @@ class Solver {
   // MPI attributes
   int mpi_rank_;
   int mpi_size_;
+  int device_count_;
 
   DISABLE_COPY_AND_ASSIGN(Solver);
 };
