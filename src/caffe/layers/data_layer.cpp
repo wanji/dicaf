@@ -179,14 +179,14 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   MPI_Status stat;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
-  DLOG(INFO) << "Waiting for start key from data coordinator: "
-    << mpi_rank << " <- " << mpi_size - 1
-    << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
-
-  DLOG(INFO) << "size: " << bufsize << ", per: " << sizeof(layer->start_buf_[0]);
-
   // fetch data from HBase
   if (Caffe::phase() != Caffe::TEST) {
+    DLOG(INFO) << "Waiting for start key from data coordinator: "
+      << mpi_rank << " <- " << mpi_size - 1
+      << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
+
+    DLOG(INFO) << "size: " << bufsize << ", per: " << sizeof(layer->start_buf_[0]);
+
     memset(layer->start_buf_, 0, bufsize);
 
     int ret = MPI_Recv(layer->start_buf_, bufsize, MPI_CHAR,
@@ -203,6 +203,8 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
       DLOG(INFO) << "ENDMSG Received!";
       return static_cast<void*>(NULL);
     }
+  } else {
+    DLOG(INFO) << "TEST Phase.";
   }
 
   // init the scanner

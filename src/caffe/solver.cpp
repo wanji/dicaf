@@ -391,7 +391,7 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
 
   DLOG(INFO) << "Post processing";
 
-  for (int i = 0; i < train_end_; ++i) {
+  for (int i = train_begin_; i < train_end_; ++i) {
     int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
         sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 1, MPI_COMM_WORLD);
 

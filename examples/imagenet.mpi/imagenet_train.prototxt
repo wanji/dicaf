@@ -1,15 +1,18 @@
 name: "CaffeNet"
 layers {
   name: "data"
-  type: DATA
+  type: HBASE_DATA
   top: "data"
   top: "label"
   data_param {
-    source: "ilsvrc12_train_leveldb"
+    host: "10.1.0.254"
+    port: 9090
+    source: "ilsvrc12_train"
     mean_file: "../../data/ilsvrc12/imagenet_mean.binaryproto"
     batch_size: 256
     crop_size: 227
     mirror: true
+    mpi_tag: 1
   }
 }
 layers {
