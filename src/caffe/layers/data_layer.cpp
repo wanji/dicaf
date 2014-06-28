@@ -183,14 +183,14 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
   if (Caffe::phase() != Caffe::TEST) {
     DLOG(INFO) << "Waiting for start key from data coordinator: "
       << mpi_rank << " <- " << mpi_size - 1
-      << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
+      << " (tag: " << MPI_TAG_DATA_TRAIN << ")";
 
     DLOG(INFO) << "size: " << bufsize << ", per: " << sizeof(layer->start_buf_[0]);
 
     memset(layer->start_buf_, 0, bufsize);
 
     int ret = MPI_Recv(layer->start_buf_, bufsize, MPI_CHAR,
-        mpi_size - 1, layer->layer_param_.data_param().mpi_tag(),
+        mpi_size - 1, MPI_TAG_DATA_TRAIN,
         MPI_COMM_WORLD, &stat);
 
     if (MPI_SUCCESS != ret) {
@@ -198,7 +198,7 @@ void* HBaseDataLayerPrefetch(void* layer_pointer) {
     }
     DLOG(INFO) << "Receive start key from data coordinator: "
       << mpi_rank << " <- " << mpi_size - 1
-      << " (" << layer->start_buf_ << ")" << " (tag: " << layer->layer_param_.data_param().mpi_tag() << ")";
+      << " (" << layer->start_buf_ << ")" << " (tag: " << MPI_TAG_DATA_TRAIN << ")";
     if (0 == strcmp(MPI_MSG_END_DATA_PREFETCH, layer->start_buf_)) {
       DLOG(INFO) << "ENDMSG Received!";
       return static_cast<void*>(NULL);

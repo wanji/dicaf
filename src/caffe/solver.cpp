@@ -147,7 +147,7 @@ void Solver<Dtype>::Solve(const char* resume_file) {
 
     if (0 == mpi_rank_) {
       for (int i=train_begin_; i<mpi_size_; i++) {
-        int ret = MPI_Send(&iter_, 1, MPI_INT, i, 100, MPI_COMM_WORLD);
+        int ret = MPI_Send(&iter_, 1, MPI_INT, i, MPI_TAG_INIT_ITER, MPI_COMM_WORLD);
         if (ret != MPI_SUCCESS) {
           LOG(FATAL) << "Sending iter_ to trainers " << i << " Failed!";
         }
@@ -157,7 +157,7 @@ void Solver<Dtype>::Solve(const char* resume_file) {
     RunParServer();
   } else if (mpi_rank_ < train_end_) {
     MPI_Status stat;
-    int ret = MPI_Recv(&iter_, 1, MPI_INT, 0, 100, MPI_COMM_WORLD, &stat);
+    int ret = MPI_Recv(&iter_, 1, MPI_INT, 0, MPI_TAG_INIT_ITER, MPI_COMM_WORLD, &stat);
     if (ret != MPI_SUCCESS) {
       LOG(FATAL) << "Receiving iter_ from header Failed! rank=" << mpi_rank_;
     }
@@ -167,7 +167,7 @@ void Solver<Dtype>::Solve(const char* resume_file) {
     RunTrainer();
   } else {
     MPI_Status stat;
-    int ret = MPI_Recv(&iter_, 1, MPI_INT, 0, 100, MPI_COMM_WORLD, &stat);
+    int ret = MPI_Recv(&iter_, 1, MPI_INT, 0, MPI_TAG_INIT_ITER, MPI_COMM_WORLD, &stat);
     if (ret != MPI_SUCCESS) {
       LOG(FATAL) << "Receiving iter_ from header Failed! rank=" << mpi_rank_;
     }
@@ -374,7 +374,7 @@ DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " 
         << " " << train_kid << ": " << train_keys.size();
 
       int ret = MPI_Send(train_keys[train_kid].data(),
-          train_keys[train_kid].size(), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+          train_keys[train_kid].size(), MPI_CHAR, i, MPI_TAG_DATA_TRAIN, MPI_COMM_WORLD);
 
       if (MPI_SUCCESS != ret) {
         LOG(FATAL) << "MPI_Recv failed";
@@ -392,7 +392,7 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
 
   for (int i = train_begin_; i < train_end_; ++i) {
     int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
-        sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, 1, MPI_COMM_WORLD);
+        sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, MPI_TAG_DATA_TRAIN, MPI_COMM_WORLD);
 
     if (MPI_SUCCESS != ret) {
       LOG(FATAL) << "MPI_Recv failed";

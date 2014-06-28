@@ -8,7 +8,6 @@ layers {
     source: "cifar-train"
     mean_file: "mean.binaryproto"
     batch_size: 100
-    mpi_tag: 1
   }
 }
 layers {
