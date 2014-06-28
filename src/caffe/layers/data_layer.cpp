@@ -504,9 +504,7 @@ HBaseDataLayer<Dtype>::~HBaseDataLayer() {
 template <typename Dtype>
 std::string HBaseDataLayer<Dtype>::SetUpDB() {
 	// Initialize the HBase client
-	shared_ptr<TTransport> socket(new TSocket(
-        this->layer_param_.data_param().host(),
-        this->layer_param_.data_param().port()));
+	shared_ptr<TTransport> socket(new TSocket(Caffe::host(), Caffe::port()));
 	this->transport_.reset(new TBufferedTransport(socket));
 	shared_ptr<TProtocol> protocol(new TBinaryProtocol(this->transport_));
 	this->client_.reset(new HbaseClient(protocol));
@@ -522,9 +520,7 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 
 		// fetch the first row
     LOG(INFO) << "** hbase info (host):  "
-      << this->layer_param_.data_param().host()
-      << ":" << this->layer_param_.data_param().port()
-		  << "/" << this->table_;
+      << Caffe::host() << ":" << Caffe::port() << "/" << this->table_;
 
     this->client_->getRow(rowResult, this->table_,
         this->start_buf_, this->attributes_);

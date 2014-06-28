@@ -59,6 +59,9 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   if (param_.random_seed() >= 0) {
     Caffe::set_random_seed(param_.random_seed());
   }
+  if (param_.has_host() && param_.has_port()) {
+    Caffe::set_hbase(param_.host(), param_.port());
+  }
 
   device_count_ = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
@@ -276,14 +279,10 @@ void Solver<Dtype>::RunDatServer() {
   size_t train_batch_size = -1;
   size_t train_fetch = -1;
   std::string table;
-  std::string host;
-  int port;
   for (size_t lid=0; lid<train_param.layers_size(); ++lid) {
     const LayerParameter_LayerType& type = train_param.layers(lid).type();
     if (type == LayerParameter_LayerType_HBASE_DATA) {
       train_batch_size = train_param.layers(lid).data_param().batch_size();
-      host  = train_param.layers(lid).data_param().host();
-      port  = train_param.layers(lid).data_param().port();
       table = train_param.layers(lid).data_param().source();
       break;
     }
@@ -297,7 +296,7 @@ void Solver<Dtype>::RunDatServer() {
   LOG(INFO) << "- Fetch " << train_fetch << " row keys for training per iter.";
 
   LOG(INFO) << "Connecting to HBase ...";
-  boost::shared_ptr<TTransport> socket(new TSocket(host, port));
+  boost::shared_ptr<TTransport> socket(new TSocket(Caffe::host(), Caffe::port()));
   boost::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
   boost::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
   shared_ptr<HbaseClient> client(new HbaseClient(protocol));

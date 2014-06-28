@@ -10,6 +10,7 @@
 #include <curand.h>
 #include <driver_types.h>  // cuda driver types
 #include <glog/logging.h>
+#include <string>
 
 /****************************************************************
  * Added by wanji - begin
@@ -22,7 +23,7 @@ const char MPI_MSG_END_DATA_PREFETCH[] = "mpi_end_dat";
 
 #define ENABLE_DATA_SERVER  1
 #define PREFETCH_ROW_KEYS   0
-#define CUDA_AWARE_MPI      0
+#define CUDA_AWARE_MPI      1
 
 const int  NUM_PAR_SRV = 1;
 const int  NUM_DAT_SRV = 1;
@@ -168,6 +169,20 @@ class Caffe {
   // Prints the current GPU status.
   static void DeviceQuery();
 
+  // Returns the hbase host
+  inline static const std::string & host() {
+    return Get().host_;
+  }
+  // Returns the hbase port
+  inline static uint32_t port() {
+    return Get().port_;
+  }
+  // Set Hbase thrift interface
+  inline static void set_hbase(const std::string & host, const uint32_t port) {
+    Get().host_ = host;
+    Get().port_ = port;
+  }
+
  protected:
   cublasHandle_t cublas_handle_;
   curandGenerator_t curand_generator_;
@@ -175,6 +190,10 @@ class Caffe {
 
   Brew mode_;
   Phase phase_;
+  // Hbase thrift interface: host and port
+  std::string host_;
+  uint32_t port_;
+
   static shared_ptr<Caffe> singleton_;
 
  private:

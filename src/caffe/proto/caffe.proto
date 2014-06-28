@@ -92,6 +92,9 @@ message SolverParameter {
   // random number generator -- useful for reproducible results. Otherwise,
   // (and by default) initialize using a seed derived from the system clock.
   optional int64 random_seed = 20 [default = -1];
+  // host and port of Hbase thrift interface
+  optional string host = 101;
+  optional uint32 port = 102;
 }
 
 // A message that stores the solver snapshots
@@ -207,11 +210,7 @@ message ConvolutionParameter {
 // Message that stores parameters used by DataLayer
 message DataParameter {
   // Specify the data source.
-  optional string host = 101;
-  optional uint32 port = 102;
   optional string source = 1;
-  // 1: training set, 2: test set
-  optional uint32 mpi_tag = 103;
 
   // For data pre-processing, we can do simple scaling and subtracting the
   // data mean, if provided. Note that the mean subtraction is always carried
@@ -229,6 +228,9 @@ message DataParameter {
   // point would be set as rand_skip * rand(0,1). Note that rand_skip should not
   // be larger than the number of keys in the leveldb.
   optional uint32 rand_skip = 7 [default = 0];
+
+  // 1: training set, 2: test set
+  optional uint32 mpi_tag = 101;
 }
 
 // Message that stores parameters used by DropoutLayer

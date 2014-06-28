@@ -25,3 +25,7 @@ snapshot: FIRST_ITER
 snapshot_prefix: "cifar10_quick"
 # solver mode: CPU or GPU
 solver_mode: GPU
+
+# Hbase parameter
+host: "10.1.0.254"
+port: 9090
