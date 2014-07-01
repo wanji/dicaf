@@ -49,14 +49,14 @@ inline std::string mpi_get_err_str(int errorcode) {
   return errstr;
 }
 
-/****************************************************************
- * Added by wanji - end
- ****************************************************************/
-
 /**
  * constant parameters
  */
-const size_t MPI_BUF_SIZE = 1024 * 1024 * 1024;
+const size_t MPI_BUF_SIZE = 16 * 1024;
+
+/****************************************************************
+ * Added by wanji - end
+ ****************************************************************/
 
 // Disable the copy and assignment operator for a class.
 #define DISABLE_COPY_AND_ASSIGN(classname) \
