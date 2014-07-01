@@ -450,11 +450,16 @@ void DataLayer<Dtype>::CreatePrefetchThread() {
   // Create the thread.
   CHECK(!pthread_create(&thread_, NULL, DataLayerPrefetch<Dtype>,
         static_cast<void*>(this))) << "Pthread execution failed.";
+  this->joined_ = false;
 }
 
 template <typename Dtype>
 void DataLayer<Dtype>::JoinPrefetchThread() {
+  if (this->joined_) {
+    return;
+  }
   CHECK(!pthread_join(thread_, NULL)) << "Pthread joining failed.";
+  this->joined_ = true;
 }
 
 template <typename Dtype>
@@ -494,6 +499,10 @@ INSTANTIATE_CLASS(DataLayer);
 
 template <typename Dtype>
 HBaseDataLayer<Dtype>::~HBaseDataLayer() {
+  LOG(INFO) << "DAT-Wait-Join: " << this;
+  this->JoinPrefetchThread();
+  LOG(INFO) << "DAT-Joint!";
+
   try {
     this->transport_->close();
   } catch (const TException &tx) {
@@ -532,7 +541,7 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
 	} catch (const TException &tx) {
 		LOG(FATAL) << "ERROR: " << tx.what();
   }
-
+  DLOG(INFO) << "DB Initialized!";
 	// Check if we would need to randomly skip a few data points
   // start keys of training net will be controlled by data server
 	if (Caffe::phase() == Caffe::TEST &&
@@ -556,6 +565,7 @@ std::string HBaseDataLayer<Dtype>::SetUpDB() {
     strncpy(this->start_buf_, rowResult.back().row.c_str(),
         sizeof(this->start_buf_));
     this->client_->scannerClose(scanner);
+    DLOG(INFO) << "Random skip finished!";
 	}
 
   return rowResult[0].columns.begin()->second.value;
@@ -586,6 +596,7 @@ void HBaseDataLayer<Dtype>::CreatePrefetchThread() {
   // Create the thread.
   CHECK(!pthread_create(&this->thread_, NULL, HBaseDataLayerPrefetch<Dtype>,
         static_cast<void*>(this))) << "Pthread execution failed.";
+  this->joined_ = false;
 }
 
 INSTANTIATE_CLASS(HBaseDataLayer);

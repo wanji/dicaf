@@ -148,6 +148,7 @@ class DataLayer : public Layer<Dtype> {
   shared_ptr<Blob<Dtype> > prefetch_label_;
   Blob<Dtype> data_mean_;
   bool output_labels_;
+  bool joined_;
   Caffe::Phase phase_;
 };
 
