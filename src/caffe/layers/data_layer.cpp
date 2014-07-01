@@ -317,9 +317,7 @@ DLOG(INFO) << "for-end" << "! rank: " << mpi_rank;
 
 template <typename Dtype>
 DataLayer<Dtype>::~DataLayer<Dtype>() {
-  LOG(INFO) << "DAT-Wait-Join: " << this;
   JoinPrefetchThread();
-  LOG(INFO) << "DAT-Joint!";
 }
 
 template <typename Dtype>
@@ -458,8 +456,10 @@ void DataLayer<Dtype>::JoinPrefetchThread() {
   if (this->joined_) {
     return;
   }
+  DLOG(INFO) << "DAT-Wait-Join: " << this;
   CHECK(!pthread_join(thread_, NULL)) << "Pthread joining failed.";
   this->joined_ = true;
+  DLOG(INFO) << "DAT-Joined!";
 }
 
 template <typename Dtype>
@@ -499,9 +499,7 @@ INSTANTIATE_CLASS(DataLayer);
 
 template <typename Dtype>
 HBaseDataLayer<Dtype>::~HBaseDataLayer() {
-  LOG(INFO) << "DAT-Wait-Join: " << this;
   this->JoinPrefetchThread();
-  LOG(INFO) << "DAT-Joint!";
 
   try {
     this->transport_->close();
