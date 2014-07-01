@@ -6,6 +6,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <sstream>
 
 #include "caffe/common.hpp"
 #include "caffe/proto/caffe.pb.h"
@@ -381,7 +382,7 @@ int Net<Dtype>::SendData(const Dtype * buf, size_t bufcnt, int target, int tag) 
       return ret;
     }
     rest -= curs;
-    DLOG(INFO) << "rest: " << rest;
+    // DLOG(INFO) << "rest: " << rest;
   }
   return MPI_SUCCESS;
 }
@@ -400,13 +401,15 @@ int Net<Dtype>::RecvData(Dtype * buf, size_t bufcnt, int source, int tag) {
       return ret;
     }
     rest -= curs;
-    DLOG(INFO) << "rest: " << rest;
+    // DLOG(INFO) << "rest: " << rest;
   }
   return MPI_SUCCESS;
 }
 
 template <typename Dtype>
 void Net<Dtype>::SendUpdateValue(int rank) {
+  int my_rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
   switch (Caffe::mode()) {
   case Caffe::CPU:
     for (int i = 0; i < params_.size(); ++i) {
@@ -426,6 +429,15 @@ void Net<Dtype>::SendUpdateValue(int rank) {
 #else
       int ret = SendData(params_[i]->cpu_diff(), params_[i]->count(), rank, MPI_TAG_PARAM_UPDATE);
 #endif
+      // std::stringstream ss;
+      // ss << "Supdate_rank-" << my_rank << " " << i << ":";
+      // for (int j=0; j<5; j++) {
+      //   ss << "\t" << params_[i]->cpu_diff()[j];
+      // }
+      // for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
+      //   ss << "\t" << params_[i]->cpu_diff()[j];
+      // }
+      // DLOG(INFO) << ss.str();
     DLOG(INFO) << "++++ sent update: " << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
@@ -458,6 +470,16 @@ void Net<Dtype>::RecvUpdateValue(int rank) {
 #else
       int ret = RecvData(params_[i]->mutable_cpu_diff(), params_[i]->count(), rank, MPI_TAG_PARAM_UPDATE);
 #endif
+      // std::stringstream ss;
+      // ss << "Rupdate_rank-" << rank << " " << i << ":";
+      // for (int j=0; j<5; j++) {
+      //   ss << "\t" << params_[i]->cpu_diff()[j];
+      // }
+      // for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
+      //   ss << "\t" << params_[i]->cpu_diff()[j];
+      // }
+      // DLOG(INFO) << ss.str();
+
     DLOG(INFO) << "++++ recd update from " << rank << ": "
       << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
@@ -493,6 +515,15 @@ void Net<Dtype>::SendParams(int rank) {
 #else
       int ret = SendData(params_[i]->cpu_data(), params_[i]->count(), rank, MPI_TAG_PARAM_VALUE);
 #endif
+      // std::stringstream ss;
+      // ss << "Sparam_rank-" << rank << " " << i << ":";
+      // for (int j=0; j<5; j++) {
+      //   ss << "\t" << params_[i]->cpu_data()[j];
+      // }
+      // for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
+      //   ss << "\t" << params_[i]->cpu_data()[j];
+      // }
+      // DLOG(INFO) << ss.str();
 
     DLOG(INFO) << "++++ sent param: " << i << "/" << params_.size() << ", "
       << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
@@ -506,6 +537,9 @@ void Net<Dtype>::SendParams(int rank) {
 template <typename Dtype>
 void Net<Dtype>::RecvParams(int rank) {
   MPI_Status stat;
+  int my_rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+
   switch (Caffe::mode()) {
   case Caffe::CPU:
     for (int i = 0; i < params_.size(); ++i) {
@@ -529,6 +563,15 @@ void Net<Dtype>::RecvParams(int rank) {
 #else
       int ret = RecvData(params_[i]->mutable_cpu_data(), params_[i]->count(), rank, MPI_TAG_PARAM_VALUE);
 #endif
+      // std::stringstream ss;
+      // ss << "Rparam_rank-" << my_rank << " " << i << ":";
+      // for (int j=0; j<5; j++) {
+      //   ss << "\t" << params_[i]->cpu_data()[j];
+      // }
+      // for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
+      //   ss << "\t" << params_[i]->cpu_data()[j];
+      // }
+      // DLOG(INFO) << ss.str();
 
     DLOG(INFO) << "++++ recd param: " << i << "/" << params_.size() << ", "
       << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
