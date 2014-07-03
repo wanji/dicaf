@@ -1,6 +1,7 @@
 // Copyright 2014 BVLC and contributors.
 
 #include <vector>
+#include <sstream>
 
 #include "caffe/layer.hpp"
 #include "caffe/vision_layers.hpp"
@@ -64,6 +65,18 @@ void ConvolutionLayer<Dtype>::SetUp(const vector<Blob<Dtype>*>& bottom,
           this->layer_param_.convolution_param().bias_filler()));
       bias_filler->Fill(this->blobs_[1].get());
     }
+
+    // for (int j=0; j<this->blobs_.size(); j++) {
+    //   std::stringstream ss;
+    //   ss << this->layer_param_.name() << "(" << j << "):";
+    //   for (int i=0; i<5; i++) {
+    //     ss << "\t" << this->blobs_[j]->cpu_data()[i];
+    //   }
+    //   for (int i=this->blobs_[j]->count()-5; i<this->blobs_[j]->count(); i++) {
+    //     ss << "\t" << this->blobs_[j]->cpu_data()[i];
+    //   }
+    //   LOG(INFO) << ss.str();
+    // }
   }
   // Set up the bias filler
   if (bias_term_) {

@@ -143,6 +143,9 @@ void Solver<Dtype>::Solve(const char* resume_file) {
     if (resume_file) {
       LOG(INFO) << "Restoring previous solver status from " << resume_file;
       Restore(resume_file);
+    } else {
+      LOG(INFO) << "Restoring previous solver status from " << resume_file;
+      Snapshot();
     }
 
     if (0 == mpi_rank_) {
