@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-# Train image net
+# Train image net with 4 GPUs on pdccmc1
 
 TOOLS=`pwd`/../../build/tools
 
