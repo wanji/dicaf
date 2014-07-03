@@ -20,6 +20,8 @@ using std::pair;
 using std::map;
 using std::set;
 
+#define PRINT_DATA 0
+
 namespace caffe {
 
 template <typename Dtype>
@@ -429,15 +431,18 @@ void Net<Dtype>::SendUpdateValue(int rank) {
 #else
       int ret = SendData(params_[i]->cpu_diff(), params_[i]->count(), rank, MPI_TAG_PARAM_UPDATE);
 #endif
-      // std::stringstream ss;
-      // ss << "Supdate_rank-" << my_rank << " " << i << ":";
-      // for (int j=0; j<5; j++) {
-      //   ss << "\t" << params_[i]->cpu_diff()[j];
-      // }
-      // for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
-      //   ss << "\t" << params_[i]->cpu_diff()[j];
-      // }
-      // DLOG(INFO) << ss.str();
+
+#if PRINT_DATA
+      std::stringstream ss;
+      ss << "Supdate_rank-" << my_rank << " " << i << ":";
+      for (int j=0; j<5; j++) {
+        ss << "\t" << params_[i]->cpu_diff()[j];
+      }
+      for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
+        ss << "\t" << params_[i]->cpu_diff()[j];
+      }
+      LOG(INFO) << ss.str();
+#endif
     DLOG(INFO) << "++++ sent update: " << i << "/" << params_.size() << ", "
       << params_[i]->count() << ", ret: " << ret;
     }
@@ -470,15 +475,18 @@ void Net<Dtype>::RecvUpdateValue(int rank) {
 #else
       int ret = RecvData(params_[i]->mutable_cpu_diff(), params_[i]->count(), rank, MPI_TAG_PARAM_UPDATE);
 #endif
-      // std::stringstream ss;
-      // ss << "Rupdate_rank-" << rank << " " << i << ":";
-      // for (int j=0; j<5; j++) {
-      //   ss << "\t" << params_[i]->cpu_diff()[j];
-      // }
-      // for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
-      //   ss << "\t" << params_[i]->cpu_diff()[j];
-      // }
-      // DLOG(INFO) << ss.str();
+
+#if PRINT_DATA
+      std::stringstream ss;
+      ss << "Rupdate_rank-" << rank << " " << i << ":";
+      for (int j=0; j<5; j++) {
+        ss << "\t" << params_[i]->cpu_diff()[j];
+      }
+      for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
+        ss << "\t" << params_[i]->cpu_diff()[j];
+      }
+      LOG(INFO) << ss.str();
+#endif
 
     DLOG(INFO) << "++++ recd update from " << rank << ": "
       << i << "/" << params_.size() << ", "
@@ -515,15 +523,18 @@ void Net<Dtype>::SendParams(int rank) {
 #else
       int ret = SendData(params_[i]->cpu_data(), params_[i]->count(), rank, MPI_TAG_PARAM_VALUE);
 #endif
-      // std::stringstream ss;
-      // ss << "Sparam_rank-" << rank << " " << i << ":";
-      // for (int j=0; j<5; j++) {
-      //   ss << "\t" << params_[i]->cpu_data()[j];
-      // }
-      // for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
-      //   ss << "\t" << params_[i]->cpu_data()[j];
-      // }
-      // DLOG(INFO) << ss.str();
+
+#if PRINT_DATA
+      std::stringstream ss;
+      ss << "Sparam_rank-" << rank << " " << i << ":";
+      for (int j=0; j<5; j++) {
+        ss << "\t" << params_[i]->cpu_data()[j];
+      }
+      for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
+        ss << "\t" << params_[i]->cpu_data()[j];
+      }
+      LOG(INFO) << ss.str();
+#endif
 
     DLOG(INFO) << "++++ sent param: " << i << "/" << params_.size() << ", "
       << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
@@ -563,15 +574,18 @@ void Net<Dtype>::RecvParams(int rank) {
 #else
       int ret = RecvData(params_[i]->mutable_cpu_data(), params_[i]->count(), rank, MPI_TAG_PARAM_VALUE);
 #endif
-      // std::stringstream ss;
-      // ss << "Rparam_rank-" << my_rank << " " << i << ":";
-      // for (int j=0; j<5; j++) {
-      //   ss << "\t" << params_[i]->cpu_data()[j];
-      // }
-      // for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
-      //   ss << "\t" << params_[i]->cpu_data()[j];
-      // }
-      // DLOG(INFO) << ss.str();
+
+#if PRINT_DATA
+      std::stringstream ss;
+      ss << "Rparam_rank-" << my_rank << " " << i << ":";
+      for (int j=0; j<5; j++) {
+        ss << "\t" << params_[i]->cpu_data()[j];
+      }
+      for (int j=params_[i]->count()-5; j<params_[i]->count(); j++) {
+        ss << "\t" << params_[i]->cpu_data()[j];
+      }
+      LOG(INFO) << ss.str();
+#endif
 
     DLOG(INFO) << "++++ recd param: " << i << "/" << params_.size() << ", "
       << params_[i]->gpu_data() << ", " << params_[i]->count() << ", ret: " << ret;
