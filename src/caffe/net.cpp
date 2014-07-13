@@ -378,7 +378,7 @@ int Net<Dtype>::SendData(const Dtype * buf, size_t bufcnt, int target, int tag) 
   size_t cnt_per_send = MPI_BUF_SIZE / sizeof(Dtype);
   while (rest > 0) {
     size_t curs = std::min(rest, cnt_per_send);
-    int ret = MPI_Send(buf + bufcnt - rest, curs, MPI_FLOAT,
+    int ret = MPI_Ssend(buf + bufcnt - rest, curs, MPI_FLOAT,
         target, tag, MPI_COMM_WORLD);
     if (ret != MPI_SUCCESS) {
       return ret;

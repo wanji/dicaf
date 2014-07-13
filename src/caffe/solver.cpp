@@ -150,7 +150,7 @@ void Solver<Dtype>::Solve(const char* resume_file) {
 
     if (0 == mpi_rank_) {
       for (int i=train_begin_; i<mpi_size_; i++) {
-        int ret = MPI_Send(&iter_, 1, MPI_INT, i, MPI_TAG_INIT_ITER, MPI_COMM_WORLD);
+        int ret = MPI_Ssend(&iter_, 1, MPI_INT, i, MPI_TAG_INIT_ITER, MPI_COMM_WORLD);
         if (ret != MPI_SUCCESS) {
           LOG(FATAL) << "Sending iter_ to trainers " << i << " Failed!";
         }
@@ -376,7 +376,7 @@ DLOG(INFO) << "RunDatServer_iter-2: " << iter_ << "/" << param_.max_iter() << " 
         << mpi_rank_ << " -> " << i
         << " " << train_kid << ": " << train_keys.size();
 
-      int ret = MPI_Send(train_keys[train_kid].data(),
+      int ret = MPI_Ssend(train_keys[train_kid].data(),
           train_keys[train_kid].size(), MPI_CHAR, i, MPI_TAG_DATA_TRAIN, MPI_COMM_WORLD);
 
       if (MPI_SUCCESS != ret) {
@@ -394,7 +394,7 @@ DLOG(INFO) << "RunDatServer_iter-1: " << iter_ << "/" << param_.max_iter() << " 
   DLOG(INFO) << "Post processing";
 
   for (int i = train_begin_; i < train_end_; ++i) {
-    int ret = MPI_Send(MPI_MSG_END_DATA_PREFETCH,
+    int ret = MPI_Ssend(MPI_MSG_END_DATA_PREFETCH,
         sizeof(MPI_MSG_END_DATA_PREFETCH), MPI_CHAR, i, MPI_TAG_DATA_TRAIN, MPI_COMM_WORLD);
 
     if (MPI_SUCCESS != ret) {
